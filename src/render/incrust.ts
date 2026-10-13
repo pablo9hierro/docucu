@@ -39,6 +39,9 @@ export interface IncrustOptions {
   clip?: (ctx: C) => void;
 }
 
+/** multiplicador global da opacidade das marcas incrustadas */
+const BOOST = 1.65;
+
 const cache = new Map<string, HTMLCanvasElement>();
 let glintCanvas: HTMLCanvasElement | null = null;
 
@@ -111,7 +114,8 @@ export function incrust(ctx: C, area: IncrustArea, o: IncrustOptions) {
   else ctx.rect(area.x, area.y, area.w, area.h);
   ctx.clip();
   ctx.globalCompositeOperation = o.light ? 'source-over' : 'screen';
-  ctx.globalAlpha *= o.alpha * f;
+  // reforço geral da marca (pedido: mais acesa, sem disputar com o texto)
+  ctx.globalAlpha *= Math.min(0.62, o.alpha * BOOST) * f;
   ctx.drawImage(logo, lx, ly, lw, lh);
 
   const phase = o.light ? null : glintPhase(o.p, o.t);
