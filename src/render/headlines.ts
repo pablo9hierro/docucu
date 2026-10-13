@@ -402,7 +402,7 @@ function aoVivo(ctx: C, c: TextClip, { h, p, t }: HeadlineArgs) {
   const s = c.style;
   const fs = s.fontScale;
   applyFont(ctx, COND, h * 0.6 * fs);
-  const label = (c.fields.kicker || 'Ao vivo').toLocaleUpperCase('pt-BR');
+  const label = (c.fields.kicker || 'Exclusivo').toLocaleUpperCase('pt-BR');
   const dot = h * 0.22;
   const lw = h * 0.35 + dot * 2 + ctx.measureText(label).width + h * 0.35;
   ctx.save();
