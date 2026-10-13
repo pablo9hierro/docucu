@@ -5,13 +5,17 @@
 import horizontalUrl from '../assets/pn-logo-horizontal.png';
 import normalUrl from '../assets/pn-logo-normal.png';
 import watermarkUrl from '../assets/pn-logo-watermark.jpg';
+import symbolUrl from '../assets/pn-symbol-watermark.jpg';
 
-/** `watermark` = versão sobre fundo preto, usada em mesclagem "screen" (incrustação). */
-export type BrandLogo = 'horizontal' | 'normal' | 'watermark';
+/**
+ * `watermark` = logo horizontal sobre fundo preto; `symbol` = só o símbolo "pn"
+ * sobre fundo preto (carimbo das manchetes, mesclagem "screen").
+ */
+export type BrandLogo = 'horizontal' | 'normal' | 'watermark' | 'symbol';
 
-export const LOGO_RATIO: Record<BrandLogo, number> = { horizontal: 2143 / 709, normal: 1214 / 1058, watermark: 1564 / 508 };
+export const LOGO_RATIO: Record<BrandLogo, number> = { horizontal: 2143 / 709, normal: 1214 / 1058, watermark: 1564 / 508, symbol: 612 / 508 };
 
-const urls: Record<BrandLogo, string> = { horizontal: horizontalUrl, normal: normalUrl, watermark: watermarkUrl };
+const urls: Record<BrandLogo, string> = { horizontal: horizontalUrl, normal: normalUrl, watermark: watermarkUrl, symbol: symbolUrl };
 const imgs: Partial<Record<BrandLogo, HTMLImageElement>> = {};
 const listeners = new Set<() => void>();
 let ready: Promise<void> | null = null;
@@ -31,7 +35,7 @@ function load(k: BrandLogo): Promise<void> {
 }
 
 export function ensureBrandAssets(): Promise<void> {
-  if (!ready) ready = Promise.all([load('horizontal'), load('normal'), load('watermark')]).then(() => undefined);
+  if (!ready) ready = Promise.all([load('horizontal'), load('normal'), load('watermark'), load('symbol')]).then(() => undefined);
   return ready;
 }
 

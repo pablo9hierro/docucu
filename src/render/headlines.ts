@@ -290,10 +290,9 @@ function marcador(ctx: C, c: TextClip, { w, h, p, t }: HeadlineArgs) {
   // 1) blocos
   ctx.fillStyle = s.primary;
   for (const b of blocks) ctx.fillRect(b.x, b.y, b.w * b.f, b.h);
-  // 2) a marca atravessa todos os blocos como uma única peça, vista "pelas janelas"
-  const ax = Math.min(...blocks.map((b) => b.x));
-  const aw = Math.max(...blocks.map((b) => b.x + b.w)) - ax;
-  incrust(ctx, { x: ax, y: y0, w: aw, h: fit.height }, {
+  // 2) carimbo no canto inferior direito do bloco da última linha
+  const lastB = blocks[blocks.length - 1]!;
+  incrust(ctx, { x: lastB.x, y: lastB.y, w: lastB.w * lastB.f, h: lastB.h }, {
     anchor: 'center',
     scale: 0.95,
     alpha: 0.3,
@@ -383,7 +382,8 @@ function nome(ctx: C, c: TextClip, { w, h, p, t }: HeadlineArgs) {
   g.addColorStop(1, shade(s.primary, 0.1));
   ctx.fillStyle = g;
   ctx.fillRect(barW, 0, w - barW, h);
-  incrust(ctx, { x: barW, y: 0, w: w - barW, h }, { anchor: 'right', scale: 0.84, alpha: 0.24, p: seg(p, 0.3, 1), t });
+  // GC: logo horizontal inteira incrustada à direita (aprovada assim)
+  incrust(ctx, { x: barW, y: 0, w: w - barW, h }, { anchor: 'right', scale: 0.84, alpha: 0.24, p: seg(p, 0.3, 1), t, mode: 'banner' });
   const pad = h * 0.18;
   ctx.globalAlpha *= eo(seg(p, 0.4, 0.8));
   ctx.textBaseline = 'middle';
