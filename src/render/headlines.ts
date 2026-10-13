@@ -2,15 +2,16 @@
  * Desenho dos presets de manchete. Origem (0,0) = canto superior esquerdo da
  * caixa do elemento; `p` ∈ [0,1] é a presença (entrada/saída encenadas).
  *
- * Cores são SEMPRE as da marca (definidas no preset) e todo preset — exceto o
- * texto livre — traz a logo Primeiras Notícias embutida.
+ * Cores são SEMPRE as da marca. A logo Primeiras Notícias fica INCRUSTADA em
+ * cada placa (ver incrust.ts): atrás do texto, em mesclagem de luz, presa à placa.
  */
 import type { TextClip } from '../core/model';
 import { clamp, ease, seg } from '../core/animation';
 import { FONTS, PN } from '../core/brand';
 import { getPreset } from '../core/presets';
-import { applyFont, drawLines, fitText, lineX, stripMarkup, type FontSpec } from './text';
+import { applyFont, drawLines, fitText, lineX, type FontSpec } from './text';
 import { drawInstagramGlyph, drawLogo, LOGO_RATIO } from './brandAssets';
+import { incrust } from './incrust';
 
 type C = CanvasRenderingContext2D;
 
@@ -19,7 +20,7 @@ export interface HeadlineArgs {
   h: number;
   /** presença encenada 0..1 */
   p: number;
-  /** tempo local em segundos (letreiro, pulsos) */
+  /** tempo local em segundos (letreiro, pulsos, reflexo da marca) */
   t: number;
 }
 
@@ -28,9 +29,9 @@ const COND_SEMI: FontSpec = { family: FONTS.condensed, weight: 600, tracking: 0.
 const SANS_BLACK: FontSpec = { family: FONTS.sans, weight: 800 };
 const SANS_BOLD: FontSpec = { family: FONTS.sans, weight: 700 };
 const SANS_MED: FontSpec = { family: FONTS.sans, weight: 500 };
+const SANS_SITE: FontSpec = { family: FONTS.sans, weight: 600, tracking: 0.12 };
 const SERIF_BLACK: FontSpec = { family: FONTS.serif, weight: 900 };
 const SERIF_ITALIC: FontSpec = { family: FONTS.serif, weight: 600, style: 'italic' };
-const MONO: FontSpec = { family: FONTS.mono, weight: 600, tracking: 0.02 };
 const IMPACT: FontSpec = { family: FONTS.impact, weight: 400 };
 
 const LR = LOGO_RATIO.horizontal;
@@ -68,7 +69,6 @@ function noShadow(ctx: C) {
   ctx.shadowOffsetY = 0;
 }
 
-/** Recorte retangular animado. */
 function clipReveal(ctx: C, x: number, y: number, w: number, h: number, f: number, from: 'left' | 'center' | 'bottom' = 'left') {
   ctx.beginPath();
   if (from === 'left') ctx.rect(x, y, w * f, h);
@@ -77,33 +77,13 @@ function clipReveal(ctx: C, x: number, y: number, w: number, h: number, f: numbe
   ctx.clip();
 }
 
-/** Linhas sobem de dentro de uma máscara, em cascata. */
 function stagger(p: number, start: number, span: number, step: number) {
   return (i: number) => eo(seg(p, start + i * step, start + i * step + span));
 }
 
-/** Logo com entrada própria (escala + opacidade). */
-function logoAt(ctx: C, x: number, y: number, h: number, f: number) {
-  if (f <= 0) return;
-  ctx.save();
-  ctx.globalAlpha *= f;
-  const s = 0.85 + 0.15 * f;
-  const w = h * LR;
-  ctx.translate(x + w / 2, y + h / 2);
-  ctx.scale(s, s);
-  drawLogo(ctx, -w / 2, -h / 2, h);
-  ctx.restore();
-}
-
-/** Fio vertical sutil separando texto e logo dentro de uma placa. */
-function divider(ctx: C, x: number, y: number, h: number, f: number) {
-  ctx.fillStyle = `rgba(255,255,255,${0.28 * f})`;
-  ctx.fillRect(x, y, Math.max(1.5, h * 0.02), h);
-}
-
 // ---------------------------------------------------------------------------
 
-function faixa(ctx: C, c: TextClip, { w, h, p }: HeadlineArgs) {
+function faixa(ctx: C, c: TextClip, { w, h, p, t }: HeadlineArgs) {
   const s = c.style;
   const fs = s.fontScale;
   const grow = eo(seg(p, 0, 0.45));
@@ -116,43 +96,48 @@ function faixa(ctx: C, c: TextClip, { w, h, p }: HeadlineArgs) {
   const rule = eio(seg(p, 0.2, 0.6));
   const r1 = Math.max(2, h * 0.012);
   const r2 = Math.max(3, h * 0.022);
+  // marca incrustada no centro da faixa, atrás da manchete
+  incrust(ctx, { x: 0, y: top + r1 + r2, w, h: h - top - r1 - r2 }, { anchor: 'center', scale: 0.72, alpha: 0.2, p: seg(p, 0.15, 1), t });
   ctx.fillStyle = shade(s.primary, -0.5);
   ctx.fillRect(0, top, w, r1);
   ctx.fillStyle = s.accent;
   ctx.fillRect((w * (1 - rule)) / 2, top + r1, w * rule, r2);
   if (p <= 0.25) return;
   const padX = w * 0.08;
-  const areaTop = h * 0.11;
-  const areaH = h * 0.54;
+  const areaTop = h * 0.12;
+  const areaH = h * 0.6;
   ctx.save();
   ctx.beginPath();
   ctx.rect(0, top + r1 + r2, w, h);
   ctx.clip();
   const fit = fitText(ctx, c.fields.title, COND, { maxW: w - padX * 2, maxH: areaH, maxSize: h * 0.2 * fs, lineHeight: 1.04, upper: s.uppercase });
-  const y0 = areaTop + (areaH - fit.height) / 2;
   const lineIn = stagger(p, 0.35, 0.35, 0.08);
-  textShadow(ctx, fit.size, 0.35);
-  drawLines(ctx, fit, padX, y0, w - padX * 2, s.align, { text: s.text, highlight: s.highlight }, {
+  textShadow(ctx, fit.size, 0.4);
+  drawLines(ctx, fit, padX, areaTop + (areaH - fit.height) / 2, w - padX * 2, s.align, { text: s.text, highlight: s.highlight }, {
     alpha: lineIn,
     dy: (i) => (1 - lineIn(i)) * fit.lineHeight * 0.6,
   });
   noShadow(ctx);
-  // rodapé: fio vermelho curto + logo
+  // assinatura editorial: fio vermelho + endereço do portal
   const fp = eo(seg(p, 0.6, 1));
-  const lw = w * 0.12 * fp;
+  const lw = w * 0.1 * fp;
   ctx.fillStyle = PN.red;
-  ctx.fillRect((w - lw) / 2, h * 0.7, lw, Math.max(2, h * 0.012));
-  const lh = h * 0.2;
-  logoAt(ctx, (w - lh * LR) / 2, h * 0.75, lh, fp);
+  ctx.fillRect((w - lw) / 2, h * 0.79, lw, Math.max(2, h * 0.012));
+  ctx.globalAlpha *= fp;
+  applyFont(ctx, SANS_SITE, h * 0.052);
+  ctx.fillStyle = withAlpha(PN.sky, 0.85);
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  ctx.fillText(PN.site.toLocaleUpperCase('pt-BR'), w / 2, h * 0.88);
   ctx.restore();
 }
 
-function urgente(ctx: C, c: TextClip, { w, h, p }: HeadlineArgs) {
+function urgente(ctx: C, c: TextClip, { w, h, p, t }: HeadlineArgs) {
   const s = c.style;
   const fs = s.fontScale;
   const barW = Math.max(3, w * 0.008);
   const gap = w * 0.022;
-  const tagH = h * 0.26;
+  const tagH = c.fields.kicker ? h * 0.24 : 0;
   const boxX = barW + gap;
   const boxY = tagH;
   const boxW = w - boxX;
@@ -160,24 +145,21 @@ function urgente(ctx: C, c: TextClip, { w, h, p }: HeadlineArgs) {
   const bar = eo(seg(p, 0, 0.3));
   ctx.fillStyle = s.highlight;
   ctx.fillRect(0, h * (1 - bar), barW, h * bar);
-  const tp = eo(seg(p, 0.1, 0.45));
   if (c.fields.kicker) {
-    applyFont(ctx, COND, tagH * 0.68 * fs);
+    const tp = eo(seg(p, 0.1, 0.45));
+    applyFont(ctx, COND, tagH * 0.72 * fs);
     const label = c.fields.kicker.toLocaleUpperCase('pt-BR');
     const tw = ctx.measureText(label).width + tagH * 0.5;
     ctx.save();
-    clipReveal(ctx, boxX, tagH * 0.08, tw, tagH * 0.84, tp);
+    clipReveal(ctx, boxX, 0, tw, tagH, tp);
     ctx.fillStyle = s.highlight;
-    ctx.fillRect(boxX, tagH * 0.08, tw, tagH * 0.84);
+    ctx.fillRect(boxX, 0, tw, tagH);
     ctx.fillStyle = PN.navy;
     ctx.textBaseline = 'middle';
     ctx.textAlign = 'left';
     ctx.fillText(label, boxX + tagH * 0.25, tagH * 0.54);
     ctx.restore();
   }
-  // logo no canto superior direito, alinhada ao selo
-  const lh = tagH * 1.05;
-  logoAt(ctx, w - lh * LR, -tagH * 0.06, lh, eo(seg(p, 0.3, 0.7)));
   const bp = eio(seg(p, 0.2, 0.6));
   if (bp <= 0) return;
   ctx.save();
@@ -187,9 +169,11 @@ function urgente(ctx: C, c: TextClip, { w, h, p }: HeadlineArgs) {
   g.addColorStop(1, shade(s.primary, 0.08));
   ctx.fillStyle = g;
   ctx.fillRect(boxX, boxY, boxW, boxH);
+  incrust(ctx, { x: boxX, y: boxY, w: boxW, h: boxH }, { anchor: 'right', scale: 0.84, alpha: 0.24, p: seg(p, 0.3, 1), t });
   const pad = boxH * 0.1;
   const fit = fitText(ctx, c.fields.title, SANS_BLACK, { maxW: boxW - pad * 2.2, maxH: boxH - pad * 2, maxSize: boxH * 0.3 * fs, lineHeight: 1.05, upper: s.uppercase });
   const lineIn = stagger(p, 0.4, 0.3, 0.07);
+  textShadow(ctx, fit.size, 0.3);
   drawLines(ctx, fit, boxX + pad * 1.1, boxY + (boxH - fit.height) / 2, boxW - pad * 2.2, s.align, { text: s.text, highlight: s.highlight }, {
     alpha: lineIn,
     dx: (i) => (1 - lineIn(i)) * -fit.size,
@@ -197,34 +181,9 @@ function urgente(ctx: C, c: TextClip, { w, h, p }: HeadlineArgs) {
   ctx.restore();
 }
 
-/** Placa com texto à esquerda e logo à direita (tarja lateral, faixa larga, câmera, GC). */
-function plateWithLogo(
-  ctx: C,
-  c: TextClip,
-  a: HeadlineArgs,
-  o: { x0: number; font: FontSpec; maxSizeK: number; lineHeight: number; logoK: number; fill: () => void; lineDx?: boolean },
-) {
-  const { w, h, p } = a;
+function tarja(ctx: C, c: TextClip, { w, h, p, t }: HeadlineArgs) {
   const s = c.style;
-  const pad = h * 0.14;
-  const lh = h * o.logoK;
-  const lw = lh * LR;
-  const textW = w - o.x0 - pad * 3 - lw;
-  o.fill();
-  const fit = fitText(ctx, c.fields.title, o.font, { maxW: textW, maxH: h - pad * 2, maxSize: h * o.maxSizeK * s.fontScale, lineHeight: o.lineHeight, upper: s.uppercase });
-  const lineIn = stagger(p, 0.4, 0.3, 0.07);
-  drawLines(ctx, fit, o.x0 + pad, (h - fit.height) / 2, textW, s.align, { text: s.text, highlight: s.highlight }, {
-    alpha: lineIn,
-    ...(o.lineDx ? { dx: (i: number) => (1 - lineIn(i)) * w * 0.05 } : { dy: (i: number) => (1 - lineIn(i)) * fit.size * 0.5 }),
-  });
-  const lf = eo(seg(p, 0.5, 0.9));
-  divider(ctx, w - pad * 1.5 - lw, h * 0.18, h * 0.64, lf);
-  logoAt(ctx, w - pad * 0.8 - lw, (h - lh) / 2, lh, lf);
-}
-
-function tarja(ctx: C, c: TextClip, a: HeadlineArgs) {
-  const { w, h, p } = a;
-  const s = c.style;
+  const fs = s.fontScale;
   const lineW = Math.max(2, w * 0.006);
   const boxX = w * 0.05;
   ctx.fillStyle = s.text;
@@ -233,31 +192,33 @@ function tarja(ctx: C, c: TextClip, a: HeadlineArgs) {
   if (bp <= 0) return;
   ctx.save();
   clipReveal(ctx, boxX, 0, w - boxX, h, bp);
-  plateWithLogo(ctx, c, a, {
-    x0: boxX,
-    font: COND,
-    maxSizeK: 0.36,
-    lineHeight: 1.06,
-    logoK: 0.5,
-    fill: () => {
-      const g = ctx.createLinearGradient(boxX, 0, w, 0);
-      g.addColorStop(0, shade(s.primary, -0.1));
-      g.addColorStop(1, shade(s.primary, 0.12));
-      ctx.fillStyle = g;
-      ctx.fillRect(boxX, 0, w - boxX, h);
-    },
+  const g = ctx.createLinearGradient(boxX, 0, w, 0);
+  g.addColorStop(0, shade(s.primary, -0.1));
+  g.addColorStop(1, shade(s.primary, 0.12));
+  ctx.fillStyle = g;
+  ctx.fillRect(boxX, 0, w - boxX, h);
+  incrust(ctx, { x: boxX, y: 0, w: w - boxX, h }, { anchor: 'right', scale: 0.84, alpha: 0.24, p: seg(p, 0.3, 1), t });
+  const pad = h * 0.14;
+  const areaW = w - boxX - pad * 2;
+  const fit = fitText(ctx, c.fields.title, COND, { maxW: areaW, maxH: h - pad * 2, maxSize: h * 0.36 * fs, lineHeight: 1.06, upper: s.uppercase });
+  const lineIn = stagger(p, 0.4, 0.3, 0.07);
+  textShadow(ctx, fit.size, 0.3);
+  drawLines(ctx, fit, boxX + pad, (h - fit.height) / 2, areaW, s.align, { text: s.text, highlight: s.highlight }, {
+    alpha: lineIn,
+    dy: (i) => (1 - lineIn(i)) * fit.size * 0.5,
   });
   ctx.restore();
 }
 
-function largo(ctx: C, c: TextClip, a: HeadlineArgs) {
-  const { w, h, p } = a;
+function largo(ctx: C, c: TextClip, { w, h, p, t }: HeadlineArgs) {
   const s = c.style;
+  const fs = s.fontScale;
   const open = eio(seg(p, 0, 0.45));
   const bandH = h * open;
   const y = (h - bandH) / 2;
   ctx.fillStyle = withAlpha(s.primary, 0.92);
   ctx.fillRect(0, y, w, bandH);
+  incrust(ctx, { x: 0, y, w, h: bandH }, { anchor: 'right', scale: 0.8, alpha: 0.22, p: seg(p, 0.3, 1), t });
   const rl = Math.max(2, h * 0.025);
   ctx.fillStyle = s.accent;
   ctx.fillRect(0, y, w * eo(seg(p, 0.25, 0.7)), rl);
@@ -267,12 +228,18 @@ function largo(ctx: C, c: TextClip, a: HeadlineArgs) {
   ctx.beginPath();
   ctx.rect(0, y, w, bandH);
   ctx.clip();
-  textShadow(ctx, h * 0.3, 0.3);
-  plateWithLogo(ctx, c, a, { x0: w * 0.015, font: COND, maxSizeK: 0.3, lineHeight: 1.05, logoK: 0.46, fill: () => undefined, lineDx: true });
+  const padX = w * 0.045;
+  const fit = fitText(ctx, c.fields.title, COND, { maxW: w - padX * 2, maxH: h * 0.8, maxSize: h * 0.3 * fs, lineHeight: 1.05, upper: s.uppercase });
+  const lineIn = stagger(p, 0.4, 0.35, 0.06);
+  textShadow(ctx, fit.size, 0.3);
+  drawLines(ctx, fit, padX, (h - fit.height) / 2, w - padX * 2, s.align, { text: s.text, highlight: s.highlight }, {
+    alpha: lineIn,
+    dx: (i) => (1 - lineIn(i)) * w * 0.06,
+  });
   ctx.restore();
 }
 
-function serif(ctx: C, c: TextClip, { w, h, p }: HeadlineArgs) {
+function serif(ctx: C, c: TextClip, { w, h, p, t }: HeadlineArgs) {
   const s = c.style;
   const fs = s.fontScale;
   const a = eo(seg(p, 0, 0.4));
@@ -285,6 +252,7 @@ function serif(ctx: C, c: TextClip, { w, h, p }: HeadlineArgs) {
   g.addColorStop(1, shade(s.primary, -0.4));
   ctx.fillStyle = g;
   ctx.fillRect(0, 0, w, h - barH);
+  incrust(ctx, { x: 0, y: 0, w, h: h - barH }, { anchor: 'center', scale: 0.82, alpha: 0.18, p: seg(p, 0.2, 1), t });
   ctx.restore();
   const segs = [shade(s.primary, -0.3), s.primary, PN.blue, s.accent, PN.white];
   const sw = w / segs.length;
@@ -292,81 +260,58 @@ function serif(ctx: C, c: TextClip, { w, h, p }: HeadlineArgs) {
     ctx.fillStyle = col;
     ctx.fillRect(i * sw, h - barH, sw * eo(seg(p, 0.2 + i * 0.07, 0.45 + i * 0.07)), barH);
   });
-  // logo sobre a borda superior da placa
-  const lh = h * 0.24;
-  logoAt(ctx, (w - lh * LR) / 2, -lh * 0.5, lh, eo(seg(p, 0.3, 0.7)));
   if (p < 0.3) return;
   const padX = w * 0.06;
-  const top = lh * 0.55;
-  const fit = fitText(ctx, c.fields.title, SERIF_BLACK, { maxW: w - padX * 2, maxH: (h - barH - top) * 0.88, maxSize: h * 0.2 * fs, lineHeight: 1.02, upper: s.uppercase });
-  textShadow(ctx, fit.size, 0.35);
-  drawLines(ctx, fit, padX, top + (h - barH - top - fit.height) / 2, w - padX * 2, s.align, { text: s.text, highlight: s.highlight }, {
+  const fit = fitText(ctx, c.fields.title, SERIF_BLACK, { maxW: w - padX * 2, maxH: (h - barH) * 0.84, maxSize: h * 0.22 * fs, lineHeight: 1.02, upper: s.uppercase });
+  textShadow(ctx, fit.size, 0.4);
+  drawLines(ctx, fit, padX, (h - barH - fit.height) / 2, w - padX * 2, s.align, { text: s.text, highlight: s.highlight }, {
     alpha: stagger(p, 0.35, 0.35, 0.08),
   });
   noShadow(ctx);
 }
 
-function camera(ctx: C, c: TextClip, { w, h, p, t }: HeadlineArgs) {
-  const s = c.style;
-  const fs = s.fontScale;
-  const bp = eio(seg(p, 0, 0.2));
-  ctx.fillStyle = s.primary;
-  ctx.fillRect(0, h * (1 - bp) * 0.5, w, h * bp);
-  if (p < 0.2) return;
-  const pad = h * 0.14;
-  const lh = h * 0.52;
-  const lw = lh * LR;
-  const areaW = w - pad * 3 - lw;
-  const full = stripMarkup(c.fields.title);
-  const fit = fitText(ctx, full, MONO, { maxW: areaW, maxH: h - pad * 2, maxSize: h * 0.36 * fs, lineHeight: 1.2, upper: s.uppercase });
-  const total = fit.lines.reduce((n, l) => n + l.runs.reduce((m, r) => m + r.text.length, 0), 0);
-  let budget = Math.floor(total * seg(p, 0.2, 1));
-  const typing = budget < total;
-  const y0 = (h - fit.height) / 2;
-  ctx.fillStyle = s.text;
-  ctx.textBaseline = 'alphabetic';
-  let cursor = { x: 0, y: 0 };
-  fit.lines.forEach((line, i) => {
-    let x = lineX(line, pad, areaW, s.align);
-    const y = y0 + i * fit.lineHeight + (fit.lineHeight - fit.size) / 2 + fit.size * 0.8;
-    for (const r of line.runs) {
-      if (budget <= 0) break;
-      const part = r.text.slice(0, budget);
-      budget -= part.length;
-      ctx.fillText(part, x, y);
-      x += part.length === r.text.length ? r.w : ctx.measureText(part).width;
-      cursor = { x, y };
-    }
-  });
-  if (typing && Math.floor(t * 3) % 2 === 0) ctx.fillRect(cursor.x + fit.size * 0.08, cursor.y - fit.size * 0.75, fit.size * 0.55, fit.size * 0.85);
-  const lf = eo(seg(p, 0.25, 0.6));
-  divider(ctx, w - pad * 1.5 - lw, h * 0.2, h * 0.6, lf);
-  logoAt(ctx, w - pad * 0.8 - lw, (h - lh) / 2, lh, lf);
-}
-
-function marcador(ctx: C, c: TextClip, { w, h, p }: HeadlineArgs) {
+function marcador(ctx: C, c: TextClip, { w, h, p, t }: HeadlineArgs) {
   const s = c.style;
   const fs = s.fontScale;
   const padX = h * 0.06;
-  const logoH = h * 0.2;
-  const areaH = h - logoH * 1.2;
-  const fit = fitText(ctx, c.fields.title, COND, { maxW: w - padX * 2, maxH: areaH, maxSize: h * 0.26 * fs, lineHeight: 1.18, upper: s.uppercase });
-  const y0 = (areaH - fit.height) / 2;
+  const fit = fitText(ctx, c.fields.title, COND, { maxW: w - padX * 2, maxH: h, maxSize: h * 0.3 * fs, lineHeight: 1.18, upper: s.uppercase });
+  const y0 = (h - fit.height) / 2;
   const n = fit.lines.length;
-  fit.lines.forEach((line, i) => {
-    const bf = eio(seg(p, i * (0.5 / n), i * (0.5 / n) + 0.35));
-    const tf = eo(seg(p, 0.2 + i * (0.5 / n), 0.55 + i * (0.5 / n)));
+  const blocks = fit.lines.map((line, i) => {
     const lx = lineX(line, padX, w - padX * 2, s.align);
-    const by = y0 + i * fit.lineHeight;
-    const bw = line.width + padX * 2;
-    const bh = fit.lineHeight * 0.98;
+    return {
+      x: lx - padX,
+      y: y0 + i * fit.lineHeight,
+      w: line.width + padX * 2,
+      h: fit.lineHeight * 0.98,
+      f: eio(seg(p, i * (0.5 / n), i * (0.5 / n) + 0.35)),
+    };
+  });
+  // 1) blocos
+  ctx.fillStyle = s.primary;
+  for (const b of blocks) ctx.fillRect(b.x, b.y, b.w * b.f, b.h);
+  // 2) a marca atravessa todos os blocos como uma única peça, vista "pelas janelas"
+  const ax = Math.min(...blocks.map((b) => b.x));
+  const aw = Math.max(...blocks.map((b) => b.x + b.w)) - ax;
+  incrust(ctx, { x: ax, y: y0, w: aw, h: fit.height }, {
+    anchor: 'center',
+    scale: 0.95,
+    alpha: 0.3,
+    p: seg(p, 0.3, 1),
+    t,
+    clip: (cx) => blocks.forEach((b) => cx.rect(b.x, b.y, b.w * b.f, b.h)),
+  });
+  // 3) texto
+  fit.lines.forEach((line, i) => {
+    const b = blocks[i]!;
+    const tf = eo(seg(p, 0.2 + i * (0.5 / n), 0.55 + i * (0.5 / n)));
     ctx.save();
-    clipReveal(ctx, lx - padX, by, bw, bh, bf);
-    ctx.fillStyle = s.primary;
-    ctx.fillRect(lx - padX, by, bw, bh);
+    ctx.beginPath();
+    ctx.rect(b.x, b.y, b.w * b.f, b.h);
+    ctx.clip();
     ctx.globalAlpha *= tf;
-    let x = lx;
-    const ty = by + (bh - fit.size) / 2 + fit.size * 0.82;
+    let x = b.x + padX;
+    const ty = b.y + (b.h - fit.size) / 2 + fit.size * 0.82;
     for (const r of line.runs) {
       ctx.fillStyle = r.hl ? s.highlight : s.text;
       if (r.text !== ' ') ctx.fillText(r.text, x, ty);
@@ -374,16 +319,14 @@ function marcador(ctx: C, c: TextClip, { w, h, p }: HeadlineArgs) {
     }
     ctx.restore();
   });
-  const lw = logoH * LR;
-  const lx = s.align === 'left' ? 0 : s.align === 'right' ? w - lw : (w - lw) / 2;
-  logoAt(ctx, lx, y0 + fit.height + logoH * 0.2, logoH, eo(seg(p, 0.55, 0.95)));
 }
 
-function chapeu(ctx: C, c: TextClip, { w, h, p }: HeadlineArgs) {
+function chapeu(ctx: C, c: TextClip, { w, h, p, t }: HeadlineArgs) {
   const s = c.style;
   const fs = s.fontScale;
+  const hasK = !!c.fields.kicker;
   const hasS = !!c.fields.subtitle;
-  const kH = h * 0.27;
+  const kH = hasK ? h * 0.27 : 0;
   const sH = hasS ? h * 0.27 : 0;
   const mH = h - kH - sH;
   const mp = eio(seg(p, 0, 0.45));
@@ -391,6 +334,8 @@ function chapeu(ctx: C, c: TextClip, { w, h, p }: HeadlineArgs) {
   clipReveal(ctx, 0, kH, w, mH, mp);
   ctx.fillStyle = s.primary;
   ctx.fillRect(0, kH, w, mH);
+  // placa clara: marca em cinza, bem sutil
+  incrust(ctx, { x: 0, y: kH, w, h: mH }, { anchor: 'right', scale: 0.84, alpha: 0.13, p: seg(p, 0.3, 1), t, light: true });
   ctx.fillStyle = s.accent;
   ctx.fillRect(0, kH, Math.max(4, w * 0.012), mH);
   const pad = mH * 0.16;
@@ -398,13 +343,12 @@ function chapeu(ctx: C, c: TextClip, { w, h, p }: HeadlineArgs) {
   ctx.globalAlpha *= eo(seg(p, 0.35, 0.75));
   drawLines(ctx, fit, pad * 1.8, kH + (mH - fit.height) / 2, w - pad * 3, s.align, { text: s.text, highlight: s.accent });
   ctx.restore();
-  if (c.fields.kicker) {
-    const kp = eo(seg(p, 0.2, 0.55));
+  if (hasK) {
     applyFont(ctx, COND, kH * 0.62 * fs);
     const label = c.fields.kicker.toLocaleUpperCase('pt-BR');
     const kw = ctx.measureText(label).width + kH * 0.8;
     ctx.save();
-    clipReveal(ctx, 0, 0, kw, kH, kp, 'bottom');
+    clipReveal(ctx, 0, 0, kw, kH, eo(seg(p, 0.2, 0.55)), 'bottom');
     ctx.fillStyle = s.accent;
     ctx.fillRect(0, 0, kw, kH);
     ctx.fillStyle = PN.white;
@@ -412,14 +356,12 @@ function chapeu(ctx: C, c: TextClip, { w, h, p }: HeadlineArgs) {
     ctx.fillText(label, kH * 0.4, kH * 0.55);
     ctx.restore();
   }
-  const lh = kH * 1.1;
-  logoAt(ctx, w - lh * LR, -kH * 0.12, lh, eo(seg(p, 0.3, 0.7)));
   if (hasS) {
-    const sp = eio(seg(p, 0.4, 0.8));
     ctx.save();
-    clipReveal(ctx, 0, kH + mH, w * 0.92, sH, sp);
+    clipReveal(ctx, 0, kH + mH, w * 0.92, sH, eio(seg(p, 0.4, 0.8)));
     ctx.fillStyle = PN.navy;
     ctx.fillRect(0, kH + mH, w * 0.92, sH);
+    incrust(ctx, { x: 0, y: kH + mH, w: w * 0.92, h: sH }, { anchor: 'right', scale: 0.86, alpha: 0.3, p: seg(p, 0.45, 1), t });
     applyFont(ctx, SANS_MED, sH * 0.52 * fs);
     ctx.fillStyle = PN.white;
     ctx.textBaseline = 'middle';
@@ -428,40 +370,31 @@ function chapeu(ctx: C, c: TextClip, { w, h, p }: HeadlineArgs) {
   }
 }
 
-function nome(ctx: C, c: TextClip, { w, h, p }: HeadlineArgs) {
+function nome(ctx: C, c: TextClip, { w, h, p, t }: HeadlineArgs) {
   const s = c.style;
   const fs = s.fontScale;
   const barW = Math.max(4, w * 0.018);
-  const bar = eo(seg(p, 0, 0.3));
   ctx.fillStyle = s.accent;
-  ctx.fillRect(0, h * (1 - bar), barW, h * bar);
-  const bp = eio(seg(p, 0.15, 0.55));
+  ctx.fillRect(0, h * (1 - eo(seg(p, 0, 0.3))), barW, h * eo(seg(p, 0, 0.3)));
   ctx.save();
-  clipReveal(ctx, barW, 0, w - barW, h, bp);
+  clipReveal(ctx, barW, 0, w - barW, h, eio(seg(p, 0.15, 0.55)));
   const g = ctx.createLinearGradient(barW, 0, w, 0);
   g.addColorStop(0, s.primary);
   g.addColorStop(1, shade(s.primary, 0.1));
   ctx.fillStyle = g;
   ctx.fillRect(barW, 0, w - barW, h);
+  incrust(ctx, { x: barW, y: 0, w: w - barW, h }, { anchor: 'right', scale: 0.84, alpha: 0.24, p: seg(p, 0.3, 1), t });
   const pad = h * 0.18;
-  const lh = h * 0.56;
-  const lw = lh * LR;
-  const textW = w - barW - pad * 3.5 - lw;
-  const ta = eo(seg(p, 0.4, 0.8));
-  ctx.save();
-  ctx.globalAlpha *= ta;
+  ctx.globalAlpha *= eo(seg(p, 0.4, 0.8));
   ctx.textBaseline = 'middle';
   applyFont(ctx, SANS_BOLD, h * (c.fields.subtitle ? 0.36 : 0.48) * fs);
   ctx.fillStyle = s.text;
-  ctx.fillText(c.fields.title, barW + pad, h * (c.fields.subtitle ? 0.36 : 0.52), textW);
+  ctx.fillText(c.fields.title, barW + pad, h * (c.fields.subtitle ? 0.36 : 0.52), w - barW - pad * 2);
   if (c.fields.subtitle) {
     applyFont(ctx, SANS_MED, h * 0.24 * fs);
     ctx.fillStyle = s.accent;
-    ctx.fillText(c.fields.subtitle, barW + pad, h * 0.72, textW);
+    ctx.fillText(c.fields.subtitle, barW + pad, h * 0.72, w - barW - pad * 2);
   }
-  ctx.restore();
-  divider(ctx, w - pad * 1.6 - lw, h * 0.2, h * 0.6, ta);
-  logoAt(ctx, w - pad * 0.8 - lw, (h - lh) / 2, lh, ta);
   ctx.restore();
 }
 
@@ -485,7 +418,6 @@ function aoVivo(ctx: C, c: TextClip, { h, p, t }: HeadlineArgs) {
   ctx.textBaseline = 'middle';
   ctx.fillText(label, h * 0.35 + dot * 2 + h * 0.2, h * 0.54);
   ctx.restore();
-  let x = lw;
   if (c.fields.title) {
     applyFont(ctx, COND_SEMI, h * 0.52 * fs);
     const loc = s.uppercase ? c.fields.title.toLocaleUpperCase('pt-BR') : c.fields.title;
@@ -494,14 +426,12 @@ function aoVivo(ctx: C, c: TextClip, { h, p, t }: HeadlineArgs) {
     clipReveal(ctx, lw, 0, locW, h, eo(seg(p, 0.35, 0.85)));
     ctx.fillStyle = withAlpha(s.accent, 0.94);
     ctx.fillRect(lw, 0, locW, h);
+    incrust(ctx, { x: lw, y: 0, w: locW, h }, { anchor: 'right', scale: 0.88, alpha: 0.32, p: seg(p, 0.45, 1), t });
     ctx.fillStyle = PN.white;
     ctx.textBaseline = 'middle';
     ctx.fillText(loc, lw + h * 0.35, h * 0.54);
     ctx.restore();
-    x += locW;
   }
-  const lh = h * 1.15;
-  logoAt(ctx, x + h * 0.25, (h - lh) / 2, lh, eo(seg(p, 0.5, 0.95)));
 }
 
 function letreiro(ctx: C, c: TextClip, { w, h, p, t }: HeadlineArgs) {
@@ -512,7 +442,7 @@ function letreiro(ctx: C, c: TextClip, { w, h, p, t }: HeadlineArgs) {
   ctx.restore();
 }
 
-/** Letreiro com bloco da logo à esquerda — usado pelo preset e pela moldura. */
+/** Letreiro com a marca incrustada na faixa — usado pelo preset e pela moldura. */
 export function drawTicker(
   ctx: C,
   w: number,
@@ -522,30 +452,26 @@ export function drawTicker(
   o: { kicker?: string; uppercase?: boolean; fontScale?: number } = {},
 ) {
   const fs = o.fontScale ?? 1;
-  ctx.fillStyle = PN.navy;
-  ctx.fillRect(0, 0, w, h);
-  // bloco da logo
-  const lh = h * 0.86;
-  const logoBlock = lh * LR + h * 0.5;
   const g = ctx.createLinearGradient(0, 0, 0, h);
-  g.addColorStop(0, shade(PN.deep, 0.1));
+  g.addColorStop(0, shade(PN.deep, 0.06));
   g.addColorStop(1, PN.navy);
   ctx.fillStyle = g;
-  ctx.fillRect(0, 0, logoBlock, h);
-  drawLogo(ctx, h * 0.25, (h - lh) / 2, lh);
-  let x0 = logoBlock;
+  ctx.fillRect(0, 0, w, h);
+  let x0 = 0;
   if (o.kicker) {
     applyFont(ctx, COND, h * 0.56 * fs);
     const label = o.kicker.toLocaleUpperCase('pt-BR');
     const kw = ctx.measureText(label).width + h * 0.9;
     ctx.fillStyle = PN.bright;
-    ctx.fillRect(x0, 0, kw, h);
+    ctx.fillRect(0, 0, kw, h);
     ctx.fillStyle = PN.white;
     ctx.textBaseline = 'middle';
     ctx.textAlign = 'left';
-    ctx.fillText(label, x0 + h * 0.45, h * 0.54);
-    x0 += kw;
+    ctx.fillText(label, h * 0.45, h * 0.54);
+    x0 = kw;
   }
+  // marca fixa no centro da faixa; o texto corre por cima dela
+  incrust(ctx, { x: x0, y: 0, w: w - x0, h }, { anchor: 'center', scale: 0.88, alpha: 0.24, p: 1, t });
   ctx.save();
   ctx.beginPath();
   ctx.rect(x0, 0, w - x0, h);
@@ -563,17 +489,18 @@ export function drawTicker(
   ctx.fillRect(0, 0, w, Math.max(2, h * 0.05));
 }
 
-function citacao(ctx: C, c: TextClip, { w, h, p }: HeadlineArgs) {
+function citacao(ctx: C, c: TextClip, { w, h, p, t }: HeadlineArgs) {
   const s = c.style;
   const fs = s.fontScale;
   const a = eo(seg(p, 0, 0.4));
   ctx.save();
   ctx.globalAlpha *= a;
-  ctx.fillStyle = withAlpha(s.primary, 0.9);
+  ctx.fillStyle = withAlpha(s.primary, 0.92);
   ctx.fillRect(0, 0, w, h);
+  ctx.restore();
+  incrust(ctx, { x: 0, y: 0, w, h }, { anchor: 'right', scale: 0.46, alpha: 0.2, p: seg(p, 0.2, 1), t });
   ctx.fillStyle = s.accent;
   ctx.fillRect(0, 0, Math.max(4, w * 0.012), h * eo(seg(p, 0.1, 0.5)));
-  ctx.restore();
   const pad = Math.min(w, h) * 0.12;
   const qs = h * 0.42;
   const qa = eo(seg(p, 0.2, 0.5));
@@ -584,35 +511,30 @@ function citacao(ctx: C, c: TextClip, { w, h, p }: HeadlineArgs) {
   ctx.textBaseline = 'top';
   ctx.fillText('“', pad, pad * 0.2 + (1 - qa) * qs * 0.3);
   ctx.restore();
-  const footH = h * 0.17;
+  const attrH = c.fields.subtitle ? h * 0.16 : 0;
   const tx = pad + qs * 0.5;
-  const fit = fitText(ctx, c.fields.title, SERIF_ITALIC, { maxW: w - tx - pad, maxH: h - pad * 1.6 - footH, maxSize: h * 0.2 * fs, lineHeight: 1.15, upper: s.uppercase });
+  const fit = fitText(ctx, c.fields.title, SERIF_ITALIC, { maxW: w - tx - pad, maxH: h - pad * 1.6 - attrH, maxSize: h * 0.2 * fs, lineHeight: 1.15, upper: s.uppercase });
   const lineIn = stagger(p, 0.3, 0.3, 0.07);
-  drawLines(ctx, fit, tx, pad * 0.8 + (h - pad * 1.6 - footH - fit.height) / 2, w - tx - pad, s.align, { text: s.text, highlight: s.highlight }, {
+  drawLines(ctx, fit, tx, pad * 0.8 + (h - pad * 1.6 - attrH - fit.height) / 2, w - tx - pad, s.align, { text: s.text, highlight: s.highlight }, {
     alpha: lineIn,
     dy: (i) => (1 - lineIn(i)) * fit.size * 0.4,
   });
-  const fp = eo(seg(p, 0.6, 1));
-  const lh = footH * 0.9;
-  const lw = lh * LR;
   if (c.fields.subtitle) {
     ctx.save();
-    ctx.globalAlpha *= fp;
-    applyFont(ctx, COND_SEMI, footH * 0.5 * fs);
+    ctx.globalAlpha *= eo(seg(p, 0.6, 1));
+    applyFont(ctx, COND_SEMI, attrH * 0.62 * fs);
     ctx.fillStyle = s.accent;
     ctx.textBaseline = 'middle';
-    ctx.fillText(`— ${c.fields.subtitle}`.toLocaleUpperCase('pt-BR'), tx, h - pad * 0.5 - footH / 2, w - tx - pad - lw - pad);
+    ctx.fillText(`— ${c.fields.subtitle}`.toLocaleUpperCase('pt-BR'), tx, h - pad * 0.6 - attrH / 2, w - tx - pad);
     ctx.restore();
   }
-  logoAt(ctx, w - pad * 0.6 - lw, h - pad * 0.5 - footH / 2 - lh / 2, lh, fp);
 }
 
-function numero(ctx: C, c: TextClip, { w, h, p }: HeadlineArgs) {
+function numero(ctx: C, c: TextClip, { w, h, p, t }: HeadlineArgs) {
   const s = c.style;
   const fs = s.fontScale;
-  const logoH = h * 0.16;
-  const capH = c.fields.subtitle ? h * 0.22 : 0;
-  const numH = h - capH - logoH * 1.25;
+  const capH = c.fields.subtitle ? h * 0.26 : 0;
+  const numH = h - capH;
   const raw = c.fields.title;
   const m = /^(\D*)([\d.,]+)(.*)$/.exec(raw);
   let shown = raw;
@@ -648,18 +570,16 @@ function numero(ctx: C, c: TextClip, { w, h, p }: HeadlineArgs) {
     clipReveal(ctx, cx, numH, cw, capH, eio(seg(p, 0.4, 0.8)), 'center');
     ctx.fillStyle = s.primary;
     ctx.fillRect(cx, numH, cw, capH);
+    incrust(ctx, { x: cx, y: numH, w: cw, h: capH }, { anchor: 'center', scale: 0.88, alpha: 0.3, p: seg(p, 0.45, 1), t });
     ctx.fillStyle = s.text;
     ctx.textBaseline = 'middle';
     ctx.textAlign = 'center';
     ctx.fillText(cap, cx + cw / 2, numH + capH * 0.54, cw - capH * 0.4);
     ctx.restore();
   }
-  const lw = logoH * LR;
-  const lx = s.align === 'left' ? 0 : s.align === 'right' ? w - lw : (w - lw) / 2;
-  logoAt(ctx, lx, numH + capH + logoH * 0.25, logoH, eo(seg(p, 0.6, 1)));
 }
 
-/** Logo + símbolo do Instagram + @primeirasnoticias_ — também usado pelas molduras. */
+/** Selo oficial: logo + símbolo do Instagram + @primeirasnoticias_ (também usado pelas molduras). */
 export function drawHandle(ctx: C, w: number, h: number, align: 'left' | 'center' | 'right', f = 1) {
   const lh = h * 0.86;
   const lw = lh * LR;
@@ -699,21 +619,16 @@ function perfil(ctx: C, c: TextClip, { w, h, p }: HeadlineArgs) {
 
 function credito(ctx: C, c: TextClip, { w, h }: HeadlineArgs) {
   const s = c.style;
-  const lh = h * 1.1;
-  const lw = lh * LR;
   applyFont(ctx, COND_SEMI, h * 0.78 * s.fontScale);
   const label = c.fields.kicker ? `${c.fields.kicker}: ${c.fields.title}` : c.fields.title;
   const text = s.uppercase ? label.toLocaleUpperCase('pt-BR') : label;
-  const tw = Math.min(ctx.measureText(text).width, w - lw - h * 0.4);
-  const total = tw + h * 0.4 + lw;
-  const x0 = s.align === 'left' ? 0 : s.align === 'right' ? w - total : (w - total) / 2;
   textShadow(ctx, h, 0.6);
   ctx.fillStyle = 'rgba(255,255,255,0.92)';
   ctx.textBaseline = 'middle';
-  ctx.textAlign = 'left';
-  ctx.fillText(text, x0, h * 0.52, tw);
+  ctx.textAlign = s.align;
+  const ax = s.align === 'left' ? 0 : s.align === 'right' ? w : w / 2;
+  ctx.fillText(text, ax, h * 0.52, w);
   noShadow(ctx);
-  drawLogo(ctx, x0 + tw + h * 0.4, (h - lh) / 2, lh);
 }
 
 function plain(ctx: C, c: TextClip, { w, h }: HeadlineArgs) {
@@ -743,7 +658,6 @@ const DRAWERS: Record<string, (ctx: C, c: TextClip, a: HeadlineArgs) => void> = 
   'pn-tarja': tarja,
   'pn-largo': largo,
   'pn-serif': serif,
-  'pn-camera': camera,
   'pn-marcador': marcador,
   'pn-chapeu': chapeu,
   'pn-nome': nome,

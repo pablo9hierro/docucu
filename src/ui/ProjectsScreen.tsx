@@ -84,7 +84,7 @@ export function ProjectsScreen() {
           <span className="wm-a">Primeiras Notícias</span>
           <span className="wm-b">Studio</span>
         </div>
-        <span className="home-local">Local · seus arquivos não saem deste computador</span>
+        <span className="home-local">Local · seus arquivos não saem deste aparelho</span>
       </header>
 
       <section className="home-new">

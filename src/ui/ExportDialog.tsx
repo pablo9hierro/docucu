@@ -1,8 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { projectDuration } from '../core/timeline';
 import { getEditor, useEditor } from '../state/store';
-import { runExport, type ExportProgress } from '../engine/exporter';
-import { deviceStorage, exportsApi } from '../platform/api';
+import { deviceStorage, exporter, type ExportProgress } from '../platform/api';
 import { stopPlayback } from './commands';
 import { formatTime } from './Transport';
 import { IconClose } from './icons';
@@ -20,7 +19,7 @@ export function ExportDialog({ onClose }: { onClose: () => void }) {
   const [quality, setQuality] = useState<(typeof QUALITY)[number]['id']>('std');
   const [fps, setFps] = useState<number>(project.fps);
   const [progress, setProgress] = useState<ExportProgress | null>(null);
-  const [result, setResult] = useState<{ file: string; blob: Blob; url: string; seconds: number } | null>(null);
+  const [result, setResult] = useState<{ file: string; where: string; blob: Blob; url: string; seconds: number } | null>(null);
   const [error, setError] = useState<string | null>(null);
   const abort = useRef<AbortController | null>(null);
   const started = useRef(0);
@@ -42,18 +41,16 @@ export function ExportDialog({ onClose }: { onClose: () => void }) {
     abort.current = ctrl;
     started.current = performance.now();
     try {
-      const r = await runExport(
+      const { blob, fileName } = await exporter.exportVideo(
         project,
         getEditor().media,
         { width, height, fps, duration, crf: QUALITY.find((q) => q.id === quality)!.crf },
         setProgress,
         ctrl.signal,
       );
-      // entrega ao dispositivo (pasta Downloads) e apaga a cópia interna do app
-      const blob = await exportsApi.fetchFile(r.id);
-      await deviceStorage.saveVideo(blob, r.file);
-      await exportsApi.discard(r.id).catch(() => undefined);
-      setResult({ file: r.file, blob, url: URL.createObjectURL(blob), seconds: (performance.now() - started.current) / 1000 });
+      // entrega à memória do dispositivo; o app não guarda cópia do vídeo final
+      const where = await deviceStorage.saveVideo(blob, fileName);
+      setResult({ file: fileName, where, blob, url: URL.createObjectURL(blob), seconds: (performance.now() - started.current) / 1000 });
     } catch (e) {
       if ((e as Error).name !== 'AbortError') setError((e as Error).message);
       setProgress(null);
@@ -149,12 +146,17 @@ export function ExportDialog({ onClose }: { onClose: () => void }) {
               <div className="export-done" data-testid="export-done">
                 <video src={result.url} controls playsInline className="export-video" />
                 <p className="small">
-                  Salvo na memória do seu aparelho, pasta <strong>Downloads</strong>: <strong>{result.file}</strong> · {result.seconds.toFixed(0)} s
+                  Salvo na memória do seu aparelho, em <strong>{result.where}</strong>: <strong>{result.file}</strong> · {result.seconds.toFixed(0)} s
                 </p>
                 <p className="muted small">O app não guarda cópia do vídeo final.</p>
                 <div className="row-gap wrap">
-                  <button className="btn primary" onClick={() => void deviceStorage.saveVideo(result.blob, result.file)}>
-                    Baixar novamente
+                  {deviceStorage.share && (
+                    <button className="btn primary" onClick={() => void deviceStorage.share!(result.file).catch(() => undefined)} data-testid="share-video">
+                      Compartilhar
+                    </button>
+                  )}
+                  <button className={`btn ${deviceStorage.share ? '' : 'primary'}`} onClick={() => void deviceStorage.saveVideo(result.blob, result.file)}>
+                    Salvar novamente
                   </button>
                   <button className="btn ghost" onClick={() => setResult(null)}>
                     Nova exportação

@@ -62,9 +62,14 @@ brand/          imagens da marca fornecidas pela redação
 
 **WYSIWYG**: `evaluateScene()` + `renderFrame()` desenham cada quadro. O preview chama os dois a cada frame e a exportação faz o mesmo, quadro a quadro, com cada vídeo posicionado no instante exato. Os JPEGs vão em lotes para o FFmpeg (`image2pipe → libx264`). O áudio é mixado a partir dos arquivos originais com o mesmo plano usado pelo player (`buildAudioPlan` → `buildFfmpegAudioGraph`: trim, velocidade, volume, fades, atraso).
 
-### Futuro app Android
+### App Android (APK) — tudo local no aparelho
 
-Passo a passo completo (Capacitor + GitHub Actions + instalação): [docs/ANDROID.md](docs/ANDROID.md).
+O mesmo app React roda dentro do Android via **Capacitor** (pasta `android/`), em **modo local**, sem servidor e sem internet:
 
+- projetos, mídias, miniaturas e formas de onda ficam na memória do aparelho (IndexedDB), em `src/platform/local/`;
+- a exportação usa o codificador H.264/AAC do próprio aparelho (**WebCodecs**) e monta o MP4 em JavaScript (`mp4-muxer`), em `src/engine/webcodecsExporter.ts`. O desenho dos quadros e o plano de áudio são os mesmos do PC;
+- o vídeo final é salvo em **Documentos/PrimeirasNoticias** e pode ser compartilhado direto (Instagram, WhatsApp).
 
-Não há APK nesta etapa. A UI só depende das interfaces de `src/platform/api.ts`. Para o Android (por exemplo com Capacitor), basta implementar `ProjectStore`, `MediaService` e `ExportService` com um backend nativo (armazenamento local + codificação via MediaCodec ou FFmpeg compilado para Android). O núcleo (`src/core`) e o renderizador não dependem de Node.
+O workflow `.github/workflows/android.yml` gera o APK a cada push na branch `pablo` e publica em **Releases** (link direto: `https://github.com/pablo9hierro/docucu/releases/latest`). O APK é assinado com a chave fixa `android/app/pn-studio.keystore`, então cada versão nova instala por cima da anterior.
+
+Para testar o modo local no PC: abra `http://localhost:5173/?local=1` ou rode `npm run build:app` (build com `VITE_PLATFORM=local`).

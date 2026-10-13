@@ -16,12 +16,18 @@
     "dev:web": "vite --open",
     "start": "npm run build && node scripts/check-env.mjs && concurrently -k -n server,web -c blue,green \"tsx server/index.ts\" \"vite preview --port 5173 --open\"",
     "build": "tsc -b && vite build",
+    "build:app": "tsc -b && vite build --mode app",
+    "android:sync": "npm run build:app && cap sync android",
     "typecheck": "tsc -b",
     "test": "vitest run",
     "test:watch": "vitest",
     "test:e2e": "playwright test"
   },
   "dependencies": {
+    "@capacitor/android": "^7.6.9",
+    "@capacitor/core": "^7.6.9",
+    "@capacitor/filesystem": "^7.1.9",
+    "@capacitor/share": "^7.0.4",
     "@fontsource/anton": "^5.2.6",
     "@fontsource/barlow": "^5.2.6",
     "@fontsource/barlow-condensed": "^5.2.6",
@@ -30,12 +36,14 @@
     "@fontsource/source-serif-4": "^5.2.8",
     "express": "^5.1.0",
     "immer": "^10.1.1",
+    "mp4-muxer": "^5.2.2",
     "react": "^19.1.0",
     "react-dom": "^19.1.0",
     "zod": "^3.25.67",
     "zustand": "^5.0.5"
   },
   "devDependencies": {
+    "@capacitor/cli": "^7.6.9",
     "@playwright/test": "^1.53.1",
     "@types/express": "^5.0.3",
     "@types/node": "^24.0.3",

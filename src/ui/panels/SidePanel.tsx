@@ -7,7 +7,7 @@ import { drawHeadline } from '../../render/headlines';
 import { ensureFonts } from '../../render/fonts';
 import { ensureBrandAssets } from '../../render/brandAssets';
 import { renderFrame } from '../../render/renderer';
-import { media as mediaApi } from '../../platform/api';
+import { IS_LOCAL, media as mediaApi } from '../../platform/api';
 import { getEditor, useEditor, type Panel } from '../../state/store';
 import { addMedia, addText, applyFrameCmd } from '../commands';
 import { ACCEPT_ATTR, importFiles, onUploads, refreshBrand, type UploadProgress } from '../importer';
@@ -154,16 +154,18 @@ function BrandPanel() {
   return (
     <>
       <p className="hint">
-        Logos, selos e molduras da redação. Coloque imagens (PNG com ou sem fundo, JPG) na pasta <code>brand/</code> do projeto ou envie por aqui. Ao inserir, a logo vai para o canto
-        superior — arraste e redimensione sobre a marca d'água que precisa cobrir.
+        Logos e selos da redação. As logos oficiais já vêm no app; envie outras imagens (PNG ou JPG) por aqui
+        {IS_LOCAL ? '' : <> ou coloque na pasta <code>brand/</code> do projeto</>}. Ao inserir, a logo vai para o canto superior — arraste e redimensione sobre a marca d'água que precisa cobrir.
       </p>
       <div className="row-gap">
         <button className="btn" onClick={() => input.current?.click()}>
           <IconUpload /> Enviar imagem
         </button>
-        <button className="btn ghost" onClick={() => void refreshBrand()}>
-          Atualizar lista
-        </button>
+        {!IS_LOCAL && (
+          <button className="btn ghost" onClick={() => void refreshBrand()}>
+            Atualizar lista
+          </button>
+        )}
       </div>
       <input
         ref={input}
