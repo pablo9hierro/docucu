@@ -1,0 +1,640 @@
+/**
+ * Timeline multitrilha com manipulação direta: arrastar blocos (inclusive entre
+ * trilhas), aparar pelas bordas, ímã, agulha arrastável, pinça/Ctrl+roda para
+ * zoom e rolagem por arraste no toque.
+ */
+import { memo, useEffect, useLayoutEffect, useRef, useState, type PointerEvent as RPointerEvent } from 'react';
+import type { Clip, MediaAsset, Project, Track } from '../../core/model';
+import {
+  addTrack,
+  clipEnd,
+  moveClip,
+  moveTrack,
+  placeClip,
+  projectDuration,
+  snapCandidates,
+  snapTime,
+  trackKindFor,
+  trimEnd,
+  trimStart,
+} from '../../core/timeline';
+import { getPreset } from '../../core/presets';
+import { getEditor, useEditor } from '../../state/store';
+import { createAudioClip, createImageClip, createVideoClip } from '../../core/factory';
+import { deleteSelection, detachAudio, duplicateSelection, seek, splitAtPlayhead } from '../commands';
+import { formatTime } from '../Transport';
+import { getWaveform } from './waveforms';
+import {
+  IconCopy,
+  IconDetach,
+  IconEye,
+  IconEyeOff,
+  IconFit,
+  IconLock,
+  IconMagnet,
+  IconMute,
+  IconPlus,
+  IconSplit,
+  IconTrash,
+  IconUnlock,
+  IconVolume,
+} from '../icons';
+
+const RULER_H = 26;
+
+function rowHeight(track: Track, isMain: boolean) {
+  if (track.kind === 'audio') return 44;
+  return isMain ? 58 : 44;
+}
+
+const TICK_STEPS = [1 / 30, 0.1, 0.25, 0.5, 1, 2, 5, 10, 15, 30, 60, 120, 300];
+
+type Gesture =
+  | { kind: 'scrub' }
+  | { kind: 'pan'; x: number; y: number; sl: number; st: number; moved: boolean; t: number }
+  | { kind: 'pinch'; d0: number; zoom0: number; anchorT: number; anchorX: number }
+  | {
+      kind: 'move';
+      id: string;
+      x0: number;
+      bases: { id: string; start: number; trackId: string; duration: number }[];
+      moved: boolean;
+    }
+  | { kind: 'trim'; id: string; edge: 'l' | 'r'; x0: number; start: number; end: number };
+
+export function Timeline() {
+  const project = useEditor((s) => s.project)!;
+  const zoom = useEditor((s) => s.zoom);
+  const selection = useEditor((s) => s.selection);
+  const snapping = useEditor((s) => s.snapping);
+  const media = useEditor((s) => s.media);
+  const scrollRef = useRef<HTMLDivElement>(null);
+  const [view, setView] = useState({ left: 0, width: 800 });
+  const [headW, setHeadW] = useState(132);
+  const [snapAt, setSnapAt] = useState<number | null>(null);
+  const gesture = useRef<Gesture | null>(null);
+  const pointers = useRef(new Map<number, { x: number; y: number }>());
+
+  const visual = project.tracks.filter((t) => t.kind === 'visual');
+  const mainId = visual[0]?.id;
+  const rows = [...visual].reverse().concat(project.tracks.filter((t) => t.kind === 'audio'));
+  const dur = projectDuration(project);
+  const laneW = Math.max(view.width - headW, (dur + 8) * zoom);
+
+  useLayoutEffect(() => {
+    const el = scrollRef.current!;
+    const update = () => {
+      setView({ left: el.scrollLeft, width: el.clientWidth });
+      setHeadW(window.matchMedia('(max-width: 899px)').matches ? 52 : 132);
+    };
+    update();
+    const ro = new ResizeObserver(update);
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, []);
+
+  const laneX = (clientX: number) => {
+    const r = scrollRef.current!.getBoundingClientRect();
+    return clientX - r.left - headW + scrollRef.current!.scrollLeft;
+  };
+  const timeAt = (clientX: number) => Math.max(0, laneX(clientX) / getEditor().zoom);
+
+  const setZoomAnchored = (z: number, anchorT: number, anchorClientX: number) => {
+    const s = getEditor();
+    s.setZoom(z);
+    const nz = getEditor().zoom;
+    const el = scrollRef.current!;
+    const r = el.getBoundingClientRect();
+    requestAnimationFrame(() => {
+      el.scrollLeft = Math.max(0, anchorT * nz - (anchorClientX - r.left - headW));
+    });
+  };
+
+  // Ctrl+roda / pinça do trackpad = zoom; roda simples = rolagem horizontal
+  useEffect(() => {
+    const el = scrollRef.current!;
+    const on = (e: WheelEvent) => {
+      if (e.ctrlKey || e.metaKey) {
+        e.preventDefault();
+        const t = timeAt(e.clientX);
+        setZoomAnchored(getEditor().zoom * Math.exp(-e.deltaY * 0.004), t, e.clientX);
+      } else if (!e.shiftKey && Math.abs(e.deltaY) > Math.abs(e.deltaX) && el.scrollHeight <= el.clientHeight + 2) {
+        e.preventDefault();
+        el.scrollLeft += e.deltaY;
+      }
+    };
+    el.addEventListener('wheel', on, { passive: false });
+    return () => el.removeEventListener('wheel', on);
+  }, [headW]);
+
+  // agulha visível durante a reprodução
+  useEffect(
+    () =>
+      useEditor.subscribe((s, p) => {
+        if (!s.playing || s.time === p.time) return;
+        const el = scrollRef.current;
+        if (!el) return;
+        const x = s.time * s.zoom;
+        const visW = el.clientWidth - headW;
+        if (x < el.scrollLeft || x > el.scrollLeft + visW - 40) el.scrollLeft = Math.max(0, x - visW * 0.15);
+      }),
+    [headW],
+  );
+
+  const snapT = (t: number, exclude: string[], candidatesExtra: number[] = []) => {
+    const s = getEditor();
+    if (!s.snapping || !s.project) return { value: t, snapped: false as const };
+    return snapTime(t, [...snapCandidates(s.project, s.time, exclude), ...candidatesExtra], 9 / s.zoom);
+  };
+
+  const trackUnder = (clientX: number, clientY: number): string | null => {
+    const el = document.elementFromPoint(clientX, clientY)?.closest('[data-track]') as HTMLElement | null;
+    return el?.dataset.track ?? null;
+  };
+
+  // ------------------------------------------------------------------ gestos
+  const onPointerDown = (e: RPointerEvent<HTMLDivElement>) => {
+    if (e.pointerType === 'mouse' && e.button !== 0) return;
+    const target = e.target as HTMLElement;
+    if (target.closest('.tl-head') || target.closest('button')) return;
+    pointers.current.set(e.pointerId, { x: e.clientX, y: e.clientY });
+    scrollRef.current!.setPointerCapture(e.pointerId);
+    const s = getEditor();
+
+    if (pointers.current.size === 2) {
+      const g = gesture.current;
+      if (g && (g.kind === 'move' || g.kind === 'trim')) s.cancelGesture();
+      const [a, b] = [...pointers.current.values()];
+      const mid = (a!.x + b!.x) / 2;
+      gesture.current = { kind: 'pinch', d0: Math.abs(b!.x - a!.x) || 1, zoom0: s.zoom, anchorT: timeAt(mid), anchorX: mid };
+      return;
+    }
+    if (pointers.current.size > 2) return;
+
+    const clipEl = target.closest('[data-clip]') as HTMLElement | null;
+    const edge = target.dataset.edge as 'l' | 'r' | undefined;
+    const onRuler = !!target.closest('.tl-ruler');
+
+    if (clipEl && !onRuler) {
+      const id = clipEl.dataset.clip!;
+      const clip = s.project!.clips.find((c) => c.id === id);
+      const track = clip && s.project!.tracks.find((t) => t.id === clip.trackId);
+      if (!clip || track?.locked) return;
+      if (edge) {
+        s.select([id]);
+        s.beginGesture();
+        gesture.current = { kind: 'trim', id, edge, x0: e.clientX, start: clip.start, end: clipEnd(clip) };
+        return;
+      }
+      const wasSelected = s.selection.includes(id);
+      if (e.shiftKey || e.ctrlKey || e.metaKey) s.select([id], true);
+      else if (!wasSelected) s.select([id]);
+      // no toque, o primeiro toque seleciona; arrastar move apenas blocos já selecionados
+      if (e.pointerType === 'touch' && !wasSelected) {
+        const el = scrollRef.current!;
+        gesture.current = { kind: 'pan', x: e.clientX, y: e.clientY, sl: el.scrollLeft, st: el.scrollTop, moved: false, t: -1 };
+        return;
+      }
+      const sel = getEditor().selection;
+      s.beginGesture();
+      gesture.current = {
+        kind: 'move',
+        id,
+        x0: e.clientX,
+        bases: s.project!.clips.filter((c) => sel.includes(c.id)).map((c) => ({ id: c.id, start: c.start, trackId: c.trackId, duration: c.duration })),
+        moved: false,
+      };
+      return;
+    }
+
+    if (onRuler || e.pointerType !== 'touch') {
+      gesture.current = { kind: 'scrub' };
+      if (!onRuler && !e.shiftKey) s.select([]);
+      seek(timeAt(e.clientX));
+      return;
+    }
+    const el = scrollRef.current!;
+    gesture.current = { kind: 'pan', x: e.clientX, y: e.clientY, sl: el.scrollLeft, st: el.scrollTop, moved: false, t: timeAt(e.clientX) };
+  };
+
+  const onPointerMove = (e: RPointerEvent<HTMLDivElement>) => {
+    if (!pointers.current.has(e.pointerId)) return;
+    pointers.current.set(e.pointerId, { x: e.clientX, y: e.clientY });
+    const g = gesture.current;
+    if (!g) return;
+    const s = getEditor();
+    switch (g.kind) {
+      case 'scrub':
+        seek(timeAt(e.clientX));
+        return;
+      case 'pan': {
+        const dx = e.clientX - g.x;
+        const dy = e.clientY - g.y;
+        if (!g.moved && Math.hypot(dx, dy) < 6) return;
+        g.moved = true;
+        scrollRef.current!.scrollLeft = g.sl - dx;
+        scrollRef.current!.scrollTop = g.st - dy;
+        return;
+      }
+      case 'pinch': {
+        const [a, b] = [...pointers.current.values()];
+        if (!a || !b) return;
+        const d = Math.abs(b.x - a.x) || 1;
+        setZoomAnchored(g.zoom0 * (d / g.d0), g.anchorT, g.anchorX);
+        return;
+      }
+      case 'move': {
+        const dxT = (e.clientX - g.x0) / s.zoom;
+        if (!g.moved && Math.abs(e.clientX - g.x0) < 3) return;
+        g.moved = true;
+        const prim = g.bases.find((b) => b.id === g.id)!;
+        const ids = g.bases.map((b) => b.id);
+        let start = Math.max(0, prim.start + dxT);
+        // imã: início ou fim do bloco encostam em bordas/agulha
+        const sStart = snapT(start, ids);
+        const sEnd = snapT(start + prim.duration, ids);
+        if (sStart.snapped && (!sEnd.snapped || Math.abs(sStart.value - start) <= Math.abs(sEnd.value - start - prim.duration))) {
+          start = sStart.value;
+          setSnapAt(sStart.value);
+        } else if (sEnd.snapped) {
+          start = sEnd.value - prim.duration;
+          setSnapAt(sEnd.value);
+        } else setSnapAt(null);
+        const delta = start - prim.start;
+        const hoverTrack = trackUnder(e.clientX, e.clientY);
+        s.updateGesture((base) => {
+          let p = base;
+          for (const b of g.bases) {
+            const clip = base.clips.find((c) => c.id === b.id)!;
+            let trackId = b.trackId;
+            if (b.id === g.id && hoverTrack) {
+              const t = base.tracks.find((x) => x.id === hoverTrack);
+              if (t && t.kind === trackKindFor(clip) && !t.locked) trackId = t.id;
+            }
+            p = moveClip(p, b.id, Math.max(0, b.start + delta), trackId);
+          }
+          return p;
+        });
+        return;
+      }
+      case 'trim': {
+        const dxT = (e.clientX - g.x0) / s.zoom;
+        if (g.edge === 'l') {
+          const sn = snapT(g.start + dxT, [g.id]);
+          setSnapAt(sn.snapped ? sn.value : null);
+          s.updateGesture((base) => trimStart(base, g.id, sn.value));
+        } else {
+          const sn = snapT(g.end + dxT, [g.id]);
+          setSnapAt(sn.snapped ? sn.value : null);
+          s.updateGesture((base) => trimEnd(base, g.id, sn.value));
+        }
+      }
+    }
+  };
+
+  const onPointerUp = (e: RPointerEvent<HTMLDivElement>, cancelled = false) => {
+    pointers.current.delete(e.pointerId);
+    const g = gesture.current;
+    const s = getEditor();
+    if (g?.kind === 'pinch') {
+      if (pointers.current.size === 0) gesture.current = null;
+      return;
+    }
+    if (pointers.current.size > 0) return;
+    if (g?.kind === 'move' || g?.kind === 'trim') {
+      if (cancelled) s.cancelGesture();
+      else s.endGesture();
+    } else if (g?.kind === 'pan' && !g.moved && !cancelled && g.t >= 0) {
+      s.select([]);
+      seek(g.t);
+    }
+    gesture.current = null;
+    setSnapAt(null);
+  };
+
+  // ------------------------------------------------------- soltar mídia da biblioteca
+  const onDrop = (e: React.DragEvent<HTMLDivElement>) => {
+    const id = e.dataTransfer.getData('application/x-pn-media');
+    if (!id) return;
+    e.preventDefault();
+    const s = getEditor();
+    const m = s.media[id];
+    if (!m || !s.project || m.status !== 'ready') return;
+    const t = timeAt(e.clientX);
+    const trackId = trackUnder(e.clientX, e.clientY) ?? undefined;
+    const clip = m.kind === 'video' ? createVideoClip(s.project, m, t) : m.kind === 'image' ? createImageClip(s.project, m, t) : createAudioClip(s.project, m, t);
+    s.apply((p) => placeClip(p, clip, trackId));
+    s.select([clip.id]);
+  };
+
+  // ------------------------------------------------------------------ régua
+  const step = TICK_STEPS.find((st) => st * zoom >= 64) ?? 600;
+  const t0 = Math.max(0, Math.floor(view.left / zoom / step) * step);
+  const t1 = (view.left + view.width) / zoom;
+  const ticks: number[] = [];
+  for (let t = t0; t <= t1 + step; t += step) ticks.push(Math.round(t * 1000) / 1000);
+
+  const fit = () => {
+    const w = (scrollRef.current?.clientWidth ?? 800) - headW - 40;
+    getEditor().setZoom(w / Math.max(1, dur));
+    if (scrollRef.current) scrollRef.current.scrollLeft = 0;
+  };
+
+  const hasSel = selection.length > 0;
+  const selVideo = project.clips.some((c) => selection.includes(c.id) && c.type === 'video' && c.hasAudio);
+
+  return (
+    <div className="tl" style={{ ['--head-w' as string]: `${headW}px` }}>
+      <div className="tl-toolbar">
+        <button className="icon-btn" onClick={splitAtPlayhead} title="Dividir (S)" aria-label="Dividir" data-testid="tl-split">
+          <IconSplit />
+        </button>
+        <button className="icon-btn" disabled={!hasSel} onClick={() => deleteSelection()} title="Excluir (Delete) · Shift+Delete fecha o espaço" aria-label="Excluir" data-testid="tl-delete">
+          <IconTrash />
+        </button>
+        <button className="icon-btn" disabled={!hasSel} onClick={duplicateSelection} title="Duplicar (Ctrl+D)" aria-label="Duplicar">
+          <IconCopy />
+        </button>
+        <button className="icon-btn" disabled={!selVideo} onClick={detachAudio} title="Separar áudio do vídeo" aria-label="Separar áudio">
+          <IconDetach />
+        </button>
+        <span className="tl-sep" />
+        <button
+          className={`icon-btn ${snapping ? 'on' : ''}`}
+          onClick={() => getEditor().set('snapping', !snapping)}
+          title="Ímã (alinhar a bordas e à agulha)"
+          aria-label="Ímã"
+        >
+          <IconMagnet />
+        </button>
+        <button
+          className="icon-btn"
+          onClick={() => getEditor().apply((p) => addTrack(p, 'visual').project)}
+          title="Nova camada"
+          aria-label="Nova camada"
+        >
+          <IconPlus />
+        </button>
+        <div className="tl-spacer" />
+        <button className="icon-btn" onClick={fit} title="Ajustar a timeline à tela" aria-label="Ajustar">
+          <IconFit />
+        </button>
+        <input
+          type="range"
+          className="zoom-range"
+          min={Math.log(4)}
+          max={Math.log(600)}
+          step={0.01}
+          value={Math.log(zoom)}
+          onChange={(e) => getEditor().setZoom(Math.exp(Number(e.target.value)))}
+          aria-label="Zoom da timeline"
+        />
+      </div>
+
+      <div
+        className="tl-scroll"
+        ref={scrollRef}
+        onScroll={(e) => setView({ left: e.currentTarget.scrollLeft, width: e.currentTarget.clientWidth })}
+        onPointerDown={onPointerDown}
+        onPointerMove={onPointerMove}
+        onPointerUp={(e) => onPointerUp(e)}
+        onPointerCancel={(e) => onPointerUp(e, true)}
+        onDragOver={(e) => e.dataTransfer.types.includes('application/x-pn-media') && e.preventDefault()}
+        onDrop={onDrop}
+        data-testid="timeline"
+      >
+        <div className="tl-content" style={{ width: headW + laneW }}>
+          <div className="tl-ruler-row" style={{ height: RULER_H }}>
+            <div className="tl-corner" />
+            <div className="tl-ruler" style={{ width: laneW }}>
+              {ticks.map((t) => (
+                <div key={t} className="tick" style={{ left: t * zoom }}>
+                  <span>{step < 1 ? formatTime(t, project.fps).slice(3) : formatTime(t, project.fps).slice(0, 5)}</span>
+                </div>
+              ))}
+            </div>
+          </div>
+
+          {rows.map((track) => (
+            <TrackRow
+              key={track.id}
+              track={track}
+              project={project}
+              isMain={track.id === mainId}
+              zoom={zoom}
+              laneW={laneW}
+              selection={selection}
+              media={media}
+              view={view}
+              headW={headW}
+            />
+          ))}
+
+          <Playhead headW={headW} />
+          {snapAt !== null && <div className="snap-line" style={{ left: headW + snapAt * zoom }} />}
+        </div>
+        {project.clips.length === 0 && <div className="tl-empty">Importe um vídeo pelo painel Mídia ou arraste arquivos para cá</div>}
+      </div>
+    </div>
+  );
+}
+
+function Playhead({ headW }: { headW: number }) {
+  const time = useEditor((s) => s.time);
+  const zoom = useEditor((s) => s.zoom);
+  return (
+    <div className="playhead" style={{ left: headW + time * zoom }}>
+      <span className="playhead-cap" />
+    </div>
+  );
+}
+
+const TrackRow = memo(function TrackRow({
+  track,
+  project,
+  isMain,
+  zoom,
+  laneW,
+  selection,
+  media,
+  view,
+  headW,
+}: {
+  track: Track;
+  project: Project;
+  isMain: boolean;
+  zoom: number;
+  laneW: number;
+  selection: string[];
+  media: Record<string, MediaAsset>;
+  view: { left: number; width: number };
+  headW: number;
+}) {
+  const h = rowHeight(track, isMain);
+  const clips = project.clips.filter((c) => c.trackId === track.id);
+  const toggle = (key: 'hidden' | 'muted' | 'locked') =>
+    getEditor().apply((p) => ({ ...p, tracks: p.tracks.map((t) => (t.id === track.id ? { ...t, [key]: !t[key] } : t)) }));
+  const removeTrack = () => getEditor().apply((p) => ({ ...p, tracks: p.tracks.filter((t) => t.id !== track.id) }));
+  const sameKind = project.tracks.filter((t) => t.kind === track.kind).length;
+
+  return (
+    <div className={`tl-row ${track.kind} ${isMain ? 'main' : ''} ${track.locked ? 'locked' : ''}`} style={{ height: h }}>
+      <div className="tl-head">
+        <span className="tl-head-name" title={track.name}>
+          {track.name}
+        </span>
+        <div className="tl-head-btns">
+          {track.kind === 'visual' ? (
+            <button className="mini-btn" onClick={() => toggle('hidden')} aria-label={track.hidden ? 'Mostrar' : 'Ocultar'} title={track.hidden ? 'Mostrar' : 'Ocultar'}>
+              {track.hidden ? <IconEyeOff /> : <IconEye />}
+            </button>
+          ) : null}
+          {(track.kind === 'audio' || isMain) && (
+            <button className="mini-btn" onClick={() => toggle('muted')} aria-label={track.muted ? 'Ativar som' : 'Silenciar'} title={track.muted ? 'Ativar som' : 'Silenciar'}>
+              {track.muted ? <IconMute /> : <IconVolume />}
+            </button>
+          )}
+          <button className="mini-btn hide-sm" onClick={() => toggle('locked')} aria-label={track.locked ? 'Destravar' : 'Travar'} title={track.locked ? 'Destravar' : 'Travar'}>
+            {track.locked ? <IconLock /> : <IconUnlock />}
+          </button>
+          {clips.length === 0 && sameKind > 1 && (
+            <button className="mini-btn hide-sm" onClick={removeTrack} aria-label="Remover trilha vazia" title="Remover trilha vazia">
+              ×
+            </button>
+          )}
+          {track.kind === 'visual' && !isMain && (
+            <button className="mini-btn hide-sm" onClick={() => getEditor().apply((p) => moveTrack(p, track.id, 1))} title="Subir camada" aria-label="Subir camada">
+              ↑
+            </button>
+          )}
+        </div>
+      </div>
+      <div className="tl-lane" data-track={track.id} style={{ width: laneW }}>
+        {clips.map((c) => {
+          const x0 = c.start * zoom;
+          const x1 = clipEnd(c) * zoom;
+          // virtualização simples: ignora blocos totalmente fora da área visível
+          if (x1 < view.left - headW - 200 || x0 > view.left + view.width + 200) return null;
+          return <ClipView key={c.id} clip={c} zoom={zoom} height={h} selected={selection.includes(c.id)} asset={'mediaId' in c ? media[c.mediaId] : undefined} />;
+        })}
+      </div>
+    </div>
+  );
+});
+
+const TYPE_LABEL: Record<Clip['type'], string> = {
+  video: 'Vídeo',
+  image: 'Imagem',
+  audio: 'Áudio',
+  text: 'Manchete',
+  blur: 'Desfoque',
+  sponsors: 'Oferecimento',
+  shape: 'Forma',
+};
+
+const ClipView = memo(function ClipView({
+  clip,
+  zoom,
+  height,
+  selected,
+  asset,
+}: {
+  clip: Clip;
+  zoom: number;
+  height: number;
+  selected: boolean;
+  asset?: MediaAsset;
+}) {
+  const w = Math.max(2, clip.duration * zoom);
+  const label =
+    clip.type === 'text' ? `${getPreset(clip.preset).name} · ${clip.fields.title.replace(/\*/g, '')}` : clip.name || TYPE_LABEL[clip.type];
+  const speed = (clip.type === 'video' || clip.type === 'audio') && clip.speed !== 1 ? `${clip.speed}×` : null;
+  const muted = (clip.type === 'video' || clip.type === 'audio') && clip.muted;
+
+  return (
+    <div
+      className={`clip clip-${clip.type} ${selected ? 'selected' : ''}`}
+      style={{ left: clip.start * zoom, width: w, height: height - 6 }}
+      data-clip={clip.id}
+      data-testid={`clip-${clip.type}`}
+    >
+      {clip.type === 'video' && asset?.thumbs && <Filmstrip clip={clip} asset={asset} zoom={zoom} width={w} height={height - 6} />}
+      {clip.type === 'image' && asset && <div className="clip-image-bg" style={{ backgroundImage: `url(${asset.url})` }} />}
+      {(clip.type === 'audio' || (clip.type === 'video' && clip.hasAudio)) && asset?.waveform && (
+        <Waveform clip={clip} url={asset.waveform} zoom={zoom} width={w} height={clip.type === 'audio' ? height - 22 : 14} />
+      )}
+      <div className="clip-label">
+        {muted && <IconMute className="clip-badge-ico" />}
+        {speed && <span className="clip-badge">{speed}</span>}
+        <span className="clip-name">{label}</span>
+      </div>
+      {clip.type !== 'audio' &&
+        clip.keyframes.map((k, i) => <span key={i} className="kf-dot" style={{ left: k.t * zoom }} />)}
+      <span className="edge edge-l" data-edge="l" />
+      <span className="edge edge-r" data-edge="r" />
+    </div>
+  );
+});
+
+function Filmstrip({ clip, asset, zoom, width, height }: { clip: Extract<Clip, { type: 'video' }>; asset: MediaAsset; zoom: number; width: number; height: number }) {
+  const th = asset.thumbs!;
+  const tw = th.width * (height / th.height);
+  const n = Math.min(300, Math.ceil(width / tw));
+  const tiles = [];
+  for (let i = 0; i < n; i++) {
+    const srcT = clip.sourceIn + ((i * tw) / zoom) * clip.speed;
+    const idx = Math.min(th.count - 1, Math.max(0, Math.floor(srcT / th.interval)));
+    tiles.push(
+      <span
+        key={i}
+        className="film-tile"
+        style={{
+          left: i * tw,
+          width: tw,
+          backgroundImage: `url(${th.url})`,
+          backgroundSize: `${th.count * tw}px ${height}px`,
+          backgroundPosition: `${-idx * tw}px 0`,
+        }}
+      />,
+    );
+  }
+  return <div className="filmstrip">{tiles}</div>;
+}
+
+function Waveform({ clip, url, zoom, width, height }: { clip: Extract<Clip, { type: 'video' | 'audio' }>; url: string; zoom: number; width: number; height: number }) {
+  const ref = useRef<HTMLCanvasElement>(null);
+  const [data, setData] = useState<{ perSec: number; peaks: number[] } | null>(null);
+  useEffect(() => {
+    let alive = true;
+    void getWaveform(url).then((d) => alive && setData(d));
+    return () => {
+      alive = false;
+    };
+  }, [url]);
+  const cw = Math.min(Math.ceil(width), 6000);
+  useEffect(() => {
+    const c = ref.current;
+    if (!c || !data) return;
+    const dpr = window.devicePixelRatio || 1;
+    c.width = cw * dpr;
+    c.height = height * dpr;
+    const ctx = c.getContext('2d')!;
+    ctx.scale(dpr, dpr);
+    ctx.clearRect(0, 0, cw, height);
+    ctx.fillStyle = clip.type === 'audio' ? 'rgba(160,230,200,0.85)' : 'rgba(255,255,255,0.55)';
+    const mid = clip.type === 'audio' ? height / 2 : height;
+    for (let x = 0; x < cw; x++) {
+      const a = clip.sourceIn + (x / zoom) * clip.speed;
+      const b = clip.sourceIn + ((x + 1) / zoom) * clip.speed;
+      const i0 = Math.floor(a * data.perSec);
+      const i1 = Math.max(i0 + 1, Math.floor(b * data.perSec));
+      let m = 0;
+      for (let i = i0; i < i1 && i < data.peaks.length; i++) m = Math.max(m, data.peaks[i]!);
+      const v = (m / 255) * clip.volume;
+      const hh = Math.min(1, v) * (clip.type === 'audio' ? height / 2 : height);
+      if (clip.type === 'audio') ctx.fillRect(x, mid - hh, 1, hh * 2);
+      else ctx.fillRect(x, mid - hh, 1, hh);
+    }
+  }, [data, cw, height, zoom, clip.sourceIn, clip.speed, clip.volume, clip.type]);
+  return <canvas ref={ref} className={`waveform ${clip.type === 'video' ? 'wf-strip' : ''}`} style={{ width: cw, height }} />;
+}
