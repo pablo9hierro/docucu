@@ -5,6 +5,7 @@ import { uid } from '../core/id';
 import { projects, type ProjectSummary } from '../platform/api';
 import { useEditor } from '../state/store';
 import { IconDots, IconPlus } from './icons';
+import { confirmDialog, promptDialog } from './dialogs';
 
 const FORMAT_ORDER: FormatId[] = ['reel', 'feed45', 'feed11', 'wide'];
 
@@ -56,7 +57,7 @@ export function ProjectsScreen() {
 
   const rename = async (s: ProjectSummary) => {
     const p = await projects.get(s.id);
-    const n = window.prompt('Novo nome do projeto', p.name);
+    const n = await promptDialog({ title: 'Renomear projeto', label: 'Nome da matéria', value: p.name, confirmLabel: 'Salvar' });
     setMenu(null);
     if (!n?.trim()) return;
     await projects.save({ ...p, name: n.trim() });
@@ -65,7 +66,13 @@ export function ProjectsScreen() {
 
   const remove = async (id: string) => {
     setMenu(null);
-    if (!window.confirm('Excluir este projeto? Os arquivos de mídia continuam na biblioteca.')) return;
+    const ok = await confirmDialog({
+      title: 'Excluir projeto?',
+      message: 'O projeto será apagado. Os arquivos de mídia continuam na biblioteca.',
+      confirmLabel: 'Excluir',
+      danger: true,
+    });
+    if (!ok) return;
     await projects.remove(id);
     void refresh();
   };

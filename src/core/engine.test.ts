@@ -6,7 +6,7 @@ import { evaluateScene, frameTimes } from './scene';
 import { createBlurClip, createProject, createTextClip, createVideoClip, fitContain, fitCover } from './factory';
 import { placeClip } from './timeline';
 import { setTransformAt, toggleKeyframeAt } from './edit';
-import { applyTemplate } from './templates';
+import { applyFrame, FRAMES, frameWindow, getFrame } from './frames';
 import type { MediaAsset, Transform } from './model';
 import { ProjectSchema } from './model';
 
@@ -162,14 +162,39 @@ describe('cena e edição', () => {
     expect(evaluateScene(p, 2)[0]!.transform.x).toBeCloseTo(10);
   });
 
-  it('modelos geram projeto válido', () => {
+  it('moldura ocupa UMA camada, substitui a anterior e enquadra o vídeo na janela', () => {
     let p = createProject('m', 'reel');
     p = placeClip(p, createVideoClip(p, video, 0), p.tracks[0]!.id);
-    for (const id of ['reels-faixa', 'reels-urgente', 'reels-tarja', 'feed-serif']) {
-      const r = applyTemplate(p, id);
+    const before = p.clips.length;
+    for (const f of FRAMES) {
+      const r = applyFrame(p, f.id);
       expect(ProjectSchema.safeParse(r.project).success).toBe(true);
-      expect(r.addedIds.length).toBeGreaterThan(0);
+      expect(r.project.clips.length).toBe(before + 1);
+      expect(r.project.clips.filter((c) => c.type === 'frame')).toHaveLength(1);
     }
+    const a = applyFrame(p, 'topo').project;
+    const b = applyFrame(a, 'central').project;
+    expect(b.clips.filter((c) => c.type === 'frame')).toHaveLength(1);
+    expect(b.tracks.filter((t) => t.name === 'Moldura')).toHaveLength(1);
+    // moldura logo acima da principal, abaixo das camadas de manchete
+    expect(b.tracks[1]!.name).toBe('Moldura');
+    const win = frameWindow(getFrame('central'), p.width, p.height);
+    const v = b.clips.find((c) => c.type === 'video')!;
+    expect(v.type === 'video' && v.transform.height).toBeCloseTo(win.h);
+    expect(v.type === 'video' && v.transform.y).toBeCloseTo(win.y + win.h / 2);
+  });
+
+  it('elementos entram na agulha com no máximo 15 s e sem passar do fim do vídeo', () => {
+    let p = createProject('d', 'reel');
+    const long = { ...video, duration: 60 };
+    p = placeClip(p, createVideoClip(p, long, 0), p.tracks[0]!.id);
+    const t = createTextClip(p, 'pn-faixa', 10);
+    expect(t.start).toBe(10);
+    expect(t.duration).toBe(15);
+    expect(createTextClip(p, 'pn-faixa', 55).duration).toBeCloseTo(5);
+    const empty = createProject('e', 'reel');
+    expect(createTextClip(empty, 'pn-faixa', 0).duration).toBe(15);
+    expect(createBlurClip(p, { x: 0, y: 0, width: 10, height: 10 }, 50).duration).toBeCloseTo(10);
   });
 
   it('quadros de exportação', () => {

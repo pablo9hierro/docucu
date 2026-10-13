@@ -36,13 +36,12 @@ Para testar o layout de celular, abra o DevTools (F12) e use o modo de dispositi
 
 - **Mídia**: importe vídeos/imagens (botão, ou arraste arquivos para a janela). Toque num item para inserir na agulha ou arraste para a timeline.
 - **Marca**: imagens da pasta `brand/` (logos, selos, molduras). Coloque seus arquivos lá ou envie pelo painel. A logo entra no canto superior: arraste e redimensione por cima da marca d'água que precisa cobrir.
-- **Manchetes**: 16 estilos (faixa, urgente, tarja lateral, faixa larga, serifado, legenda de câmera, marcador por linha, lower third, GC, ao vivo, letreiro, citação, número, @perfil, crédito, texto livre). Duplo clique ou duplo toque no vídeo edita o texto; `*trecho*` fica na cor de destaque.
-- **Modelos**: diagramação completa de um clique (vídeo no topo + faixa, tela cheia + urgente etc.).
+- **Manchetes e molduras**: escolha uma **moldura** (vídeo no topo, central, janela editorial, tela cheia, tela cheia com letreiro) e uma **manchete**, e as duas se encaixam. Cada escolha vira **um único item** na timeline, inserido na agulha. Manchetes: faixa, urgente, tarja lateral, faixa larga, serifado, legenda de câmera, marcador por linha, lower third, GC, ao vivo, letreiro, citação, número, @perfil (com o símbolo do Instagram e `@primeirasnoticias_`), crédito e texto livre. Todas usam as cores da marca, com a logo Primeiras Notícias embutida e animação padrão de 1 s. Pelo inspector você só ajusta texto, alinhamento, caixa alta e corpo. **Restaurar padrão** volta qualquer item à configuração do template. Duplo clique ou duplo toque edita o texto; `*trecho*` fica em destaque.
 - **Desfoque**: desenhe um retângulo ou oval sobre o vídeo; mova e ajuste pelas alças. Também pode pixelizar. Para seguir algo em movimento, use keyframes.
-- **Elementos**: bloco "Oferecimento" com logos de patrocinadores, retângulos e sombras de leitura.
+- **Inserção**: tudo entra exatamente na agulha, com no máximo 15 s e nunca além do fim do vídeo. Para estender, arraste a borda na timeline.
 - **Canvas**: arrastar move; os cantos escalam; as laterais mudam largura/altura (o texto se reorganiza ao vivo); a bolinha gira. No toque, pinça com dois dedos escala e gira; no trackpad, Ctrl+roda escala.
 - **Timeline**: arraste blocos (inclusive entre trilhas), puxe as bordas para cortar, ímã nas bordas e na agulha, pinça/Ctrl+roda para zoom. No toque, o primeiro toque seleciona e o arraste move o bloco selecionado; arrastar em área vazia rola.
-- **Exportar**: MP4 H.264 + AAC renderizado pelo mesmo motor do preview (o que você vê é o que sai).
+- **Exportar**: MP4 H.264 + AAC renderizado pelo mesmo motor do preview (o que você vê é o que sai). Ao terminar, o vídeo é salvo **na memória do aparelho** (pasta Downloads do PC ou do Android). O app não guarda cópia do vídeo final.
 
 Atalhos: `Espaço` reproduzir · `S` dividir · `Delete` excluir (`Shift+Delete` fecha o espaço) · `Ctrl+Z / Ctrl+Shift+Z` · `Ctrl+D` duplicar · `Ctrl+C / Ctrl+V` · `,` `.` quadro a quadro · setas movem o item selecionado.
 

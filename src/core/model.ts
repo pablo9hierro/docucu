@@ -173,7 +173,20 @@ export const ShapeClipSchema = z.object({
   radius: num.min(0),
 });
 
+/**
+ * Moldura: UMA camada que diagrama o quadro inteiro — fundo da marca fora da
+ * janela do vídeo, logo, @perfil e (opcional) letreiro. Ocupa o quadro todo.
+ */
+export const FrameClipSchema = z.object({
+  type: z.literal('frame'),
+  ...VisualBase,
+  frame: z.string(),
+  /** texto do letreiro, quando a moldura tem letreiro */
+  text: z.string(),
+});
+
 export const ClipSchema = z.discriminatedUnion('type', [
+  FrameClipSchema,
   VideoClipSchema,
   ImageClipSchema,
   AudioClipSchema,
@@ -190,6 +203,7 @@ export type TextClip = z.infer<typeof TextClipSchema>;
 export type BlurClip = z.infer<typeof BlurClipSchema>;
 export type SponsorsClip = z.infer<typeof SponsorsClipSchema>;
 export type ShapeClip = z.infer<typeof ShapeClipSchema>;
+export type FrameClip = z.infer<typeof FrameClipSchema>;
 export type Clip = z.infer<typeof ClipSchema>;
 export type ClipType = Clip['type'];
 export type VisualClip = Exclude<Clip, AudioClip>;

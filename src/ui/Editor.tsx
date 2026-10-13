@@ -29,11 +29,9 @@ import {
   IconBack,
   IconBlur,
   IconBrand,
-  IconElements,
   IconExport,
   IconMedia,
   IconRedo,
-  IconTemplate,
   IconText,
   IconUndo,
 } from './icons';
@@ -42,9 +40,7 @@ const RAIL: { id: Panel; label: string; icon: typeof IconMedia }[] = [
   { id: 'media', label: 'Mídia', icon: IconMedia },
   { id: 'brand', label: 'Marca', icon: IconBrand },
   { id: 'text', label: 'Manchetes', icon: IconText },
-  { id: 'templates', label: 'Modelos', icon: IconTemplate },
   { id: 'blur', label: 'Desfoque', icon: IconBlur },
-  { id: 'elements', label: 'Elementos', icon: IconElements },
   { id: 'audio', label: 'Áudio', icon: IconAudio },
 ];
 

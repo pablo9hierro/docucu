@@ -1,24 +1,25 @@
 import { useEffect, useRef, useState } from 'react';
-import type { MediaAsset, TextClip } from '../../core/model';
+import type { MediaAsset, Project, TextClip } from '../../core/model';
 import { HEADLINE_PRESETS, type PresetCategory } from '../../core/presets';
-import { TEMPLATES } from '../../core/templates';
+import { FRAMES, applyFrame, frameWindow, getFrame } from '../../core/frames';
 import { createTextClip, createProject } from '../../core/factory';
 import { drawHeadline } from '../../render/headlines';
 import { ensureFonts } from '../../render/fonts';
+import { ensureBrandAssets } from '../../render/brandAssets';
+import { renderFrame } from '../../render/renderer';
 import { media as mediaApi } from '../../platform/api';
 import { getEditor, useEditor, type Panel } from '../../state/store';
-import { addMedia, addShape, addSponsors, addText, applyTemplateCmd } from '../commands';
+import { addMedia, addText, applyFrameCmd } from '../commands';
 import { ACCEPT_ATTR, importFiles, onUploads, refreshBrand, type UploadProgress } from '../importer';
 import { formatTime } from '../Transport';
-import { IconClose, IconPlus, IconTrash, IconUpload } from '../icons';
+import { confirmDialog } from '../dialogs';
+import { IconClose, IconTrash, IconUpload } from '../icons';
 
 const TITLES: Record<Panel, string> = {
   media: 'Mídia',
   brand: 'Marca',
-  text: 'Manchetes',
-  templates: 'Modelos de publicação',
+  text: 'Manchetes e molduras',
   blur: 'Desfoque',
-  elements: 'Elementos',
   audio: 'Áudio',
 };
 
@@ -36,9 +37,7 @@ export function SidePanel({ panel, onClose }: { panel: Panel; onClose: () => voi
         {panel === 'audio' && <MediaPanel kinds={['audio']} />}
         {panel === 'brand' && <BrandPanel />}
         {panel === 'text' && <TextPanel />}
-        {panel === 'templates' && <TemplatesPanel />}
         {panel === 'blur' && <BlurPanel />}
-        {panel === 'elements' && <ElementsPanel />}
       </div>
     </aside>
   );
@@ -65,7 +64,13 @@ function MediaPanel({ kinds }: { kinds: MediaAsset['kind'][] }) {
 
   const remove = async (m: MediaAsset) => {
     const used = getEditor().project?.clips.some((c) => ('mediaId' in c && c.mediaId === m.id) || (c.type === 'sponsors' && c.mediaIds.includes(m.id)));
-    if (!window.confirm(used ? 'Este arquivo está em uso no projeto. Excluir mesmo assim?' : `Excluir "${m.name}" da biblioteca?`)) return;
+    const ok = await confirmDialog({
+      title: 'Excluir arquivo?',
+      message: used ? `"${m.name}" está em uso neste projeto. Os trechos que usam este arquivo ficarão vazios.` : `"${m.name}" será removido da biblioteca.`,
+      confirmLabel: 'Excluir',
+      danger: true,
+    });
+    if (!ok) return;
     await mediaApi.remove(m.id);
     getEditor().removeMedia(m.id);
   };
@@ -208,9 +213,30 @@ const CATS: { id: PresetCategory; label: string }[] = [
 ];
 
 function TextPanel() {
+  const format = useEditor((s) => s.project?.format ?? 'reel');
+  const clips = useEditor((s) => s.project?.clips);
+  const current = clips?.find((c) => c.type === 'frame');
+  const currentFrame = current?.type === 'frame' ? current.frame : null;
   return (
     <>
-      <p className="hint">Toque para inserir na agulha. Duplo toque no vídeo edita o texto; use *asteriscos* para destacar.</p>
+      <p className="hint">Escolha a moldura e a manchete — as duas se encaixam. Cada escolha vira um único item na timeline, inserido na agulha.</p>
+      <section className="preset-section">
+        <h4>Molduras</h4>
+        <div className="frame-grid">
+          {FRAMES.map((f) => (
+            <button
+              key={f.id}
+              className={`frame-card ${currentFrame === f.id ? 'on' : ''}`}
+              onClick={() => applyFrameCmd(f.id)}
+              title={f.description}
+              data-testid={`frame-${f.id}`}
+            >
+              <FrameThumb frameId={f.id} format={format} />
+              <span>{f.name}</span>
+            </button>
+          ))}
+        </div>
+      </section>
       {CATS.map((cat) => (
         <section key={cat.id} className="preset-section">
           <h4>{cat.label}</h4>
@@ -233,7 +259,7 @@ function PresetThumb({ presetId }: { presetId: string }) {
   const ref = useRef<HTMLCanvasElement>(null);
   useEffect(() => {
     let alive = true;
-    void ensureFonts().then(() => {
+    void Promise.all([ensureFonts(), ensureBrandAssets()]).then(() => {
       const c = ref.current;
       if (!alive || !c) return;
       const p = createProject('thumb', 'reel');
@@ -263,36 +289,37 @@ function PresetThumb({ presetId }: { presetId: string }) {
   return <canvas ref={ref} className="preset-thumb" />;
 }
 
-function TemplatesPanel() {
-  const all = useEditor((s) => s.media);
-  const format = useEditor((s) => s.project?.format ?? 'reel');
-  const brand = Object.values(all).filter((m) => m.brand);
-  const [logoId, setLogoId] = useState<string>('');
-  const logo = brand.find((b) => b.id === logoId);
-  return (
-    <>
-      <p className="hint">Aplica a diagramação completa sobre o vídeo atual: posição do vídeo, manchete, logo e @perfil. Tudo continua editável.</p>
-      <label className="field">
-        <span>Logo no modelo</span>
-        <select className="input" value={logoId} onChange={(e) => setLogoId(e.target.value)}>
-          <option value="">Sem logo</option>
-          {brand.map((b) => (
-            <option key={b.id} value={b.id}>
-              {b.name}
-            </option>
-          ))}
-        </select>
-      </label>
-      <div className="template-list">
-        {TEMPLATES.filter((t) => t.formats.includes(format)).map((t) => (
-          <button key={t.id} className="template-card" onClick={() => applyTemplateCmd(t.id, logo)} data-testid={`template-${t.id}`}>
-            <strong>{t.name}</strong>
-            <span className="muted small">{t.description}</span>
-          </button>
-        ))}
-      </div>
-    </>
-  );
+/** Miniatura da moldura no formato do projeto; a janela do vídeo aparece em cinza. */
+function FrameThumb({ frameId, format }: { frameId: string; format: Project['format'] }) {
+  const ref = useRef<HTMLCanvasElement>(null);
+  useEffect(() => {
+    let alive = true;
+    void Promise.all([ensureFonts(), ensureBrandAssets()]).then(() => {
+      const c = ref.current;
+      if (!alive || !c) return;
+      let p = createProject('thumb', format);
+      p = { ...applyFrame({ ...p, background: '#56606c' }, frameId).project };
+      const dpr = window.devicePixelRatio || 1;
+      const cssW = format === 'wide' ? 150 : 84;
+      c.width = Math.round(cssW * dpr);
+      c.height = Math.round((c.width / p.width) * p.height);
+      c.style.width = `${cssW}px`;
+      const ctx = c.getContext('2d')!;
+      renderFrame(ctx, p, 1, { video: () => null, image: () => null, size: () => null }, { editorHints: false });
+      // marca a janela do vídeo
+      const win = frameWindow(getFrame(frameId), p.width, p.height);
+      const k = c.width / p.width;
+      ctx.fillStyle = 'rgba(255,255,255,0.7)';
+      ctx.font = `${Math.round(11 * dpr)}px "IBM Plex Sans", sans-serif`;
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.fillText('vídeo', (win.x + win.w / 2) * k, (win.y + win.h / 2) * k);
+    });
+    return () => {
+      alive = false;
+    };
+  }, [frameId, format]);
+  return <canvas ref={ref} className="frame-thumb" />;
 }
 
 function BlurPanel() {
@@ -325,31 +352,3 @@ function BlurPanel() {
   );
 }
 
-function ElementsPanel() {
-  return (
-    <>
-      <section className="preset-section">
-        <h4>Patrocínio</h4>
-        <button className="template-card" onClick={() => addSponsors()}>
-          <strong>Oferecimento</strong>
-          <span className="muted small">Linha "Oferecimento" com logos dos patrocinadores. Adicione as logos no ajuste do item.</span>
-        </button>
-      </section>
-      <section className="preset-section">
-        <h4>Formas</h4>
-        <div className="row-gap wrap">
-          <button className="btn" onClick={() => addShape('rect')}>
-            <IconPlus /> Retângulo
-          </button>
-          <button className="btn" onClick={() => addShape('scrim-bottom')}>
-            <IconPlus /> Sombra inferior
-          </button>
-          <button className="btn" onClick={() => addShape('scrim-top')}>
-            <IconPlus /> Sombra superior
-          </button>
-        </div>
-        <p className="hint">Sombras escurecem a imagem atrás das manchetes para dar leitura.</p>
-      </section>
-    </>
-  );
-}

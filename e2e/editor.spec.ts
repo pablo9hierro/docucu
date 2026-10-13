@@ -105,11 +105,17 @@ test('fluxo completo: importar, manchete, manipular, desfocar, cortar e exportar
 
   // exportação real com FFmpeg
   await page.getByTestId('open-export').click();
+  const downloadPromise = page.waitForEvent('download', { timeout: 150_000 });
   await page.getByTestId('start-export').click();
-  await expect(page.getByTestId('export-done')).toBeVisible({ timeout: 150_000 });
-  const exportsList = await page.evaluate(async () => (await fetch('/api/exports')).json());
-  const done = (exportsList as { status: string; filePath: string }[]).find((e) => e.status === 'done')!;
-  const info = probe(done.filePath);
+  const download = await downloadPromise;
+  await expect(page.getByTestId('export-done')).toBeVisible({ timeout: 30_000 });
+  const saved = `test-results/${download.suggestedFilename()}`;
+  await download.saveAs(saved);
+  // a cópia interna do app foi apagada após a entrega ao dispositivo
+  const exportsList = (await page.evaluate(async () => (await fetch('/api/exports')).json())) as { status: string; filePath: string | null }[];
+  expect(exportsList[0]!.status).toBe('delivered');
+  expect(exportsList[0]!.filePath).toBeNull();
+  const info = probe(saved);
   expect(info.streams).toContain('video');
   expect(info.streams).toContain('audio');
   expect(info.width).toBe(1080);
@@ -120,15 +126,52 @@ test('fluxo completo: importar, manchete, manipular, desfocar, cortar e exportar
   expect(errors).toEqual([]);
 });
 
-test('modelo de publicação aplica diagramação com logo da marca', async ({ page }) => {
+test('confirmação estilizada ao excluir mídia', async ({ page }) => {
   await newReelWithVideo(page);
-  await page.getByTestId('rail-templates').click();
-  const select = page.locator('select').first();
-  const options = await select.locator('option').allTextContents();
-  if (options.length > 1) await select.selectOption({ index: 1 });
-  await page.getByTestId('template-reels-faixa').click();
-  const s = await state(page);
-  expect(s.clips.some((c) => c.type === 'text')).toBe(true);
-  await page.waitForTimeout(800);
-  await page.screenshot({ path: 'test-results/template-faixa.png' });
+  const item = page.getByTestId('media-item').first();
+  await item.hover();
+  await item.locator('.media-del').click();
+  const dlg = page.getByTestId('dialog');
+  await expect(dlg).toBeVisible();
+  await expect(dlg).toContainText('Excluir arquivo?');
+  await page.waitForTimeout(200);
+  await page.screenshot({ path: 'test-results/dialog.png' });
+  await page.keyboard.press('Escape');
+  await expect(dlg).toHaveCount(0);
+});
+
+test('moldura + manchete: cada escolha vira um único item, inserido na agulha', async ({ page }) => {
+  await newReelWithVideo(page);
+  await page.evaluate(() => (window as unknown as { __editor: { getState(): { setTime(t: number): void } } }).__editor.getState().setTime(1.5));
+  await page.getByTestId('rail-text').click();
+  await page.getByTestId('frame-topo').click();
+  let s = await state(page);
+  expect(s.clips).toHaveLength(2); // vídeo + 1 moldura
+  expect(s.clips.filter((c) => c.type === 'frame')).toHaveLength(1);
+  // trocar de moldura substitui, não acumula
+  await page.getByTestId('frame-central').click();
+  s = await state(page);
+  expect(s.clips.filter((c) => c.type === 'frame')).toHaveLength(1);
+  await page.getByTestId('frame-topo').click();
+
+  await page.getByTestId('preset-pn-faixa').click();
+  s = await state(page);
+  expect(s.clips).toHaveLength(3);
+  const text = s.clips.find((c) => c.type === 'text')!;
+  expect(text.start).toBeCloseTo(1.5, 1);
+  expect(text.start + text.duration).toBeLessThanOrEqual(6.01); // não passa do fim do vídeo
+
+  // restaurar padrão depois de mover
+  const before = text.transform!;
+  await page.evaluate((id) => {
+    const ed = (window as unknown as { __editor: { getState(): { apply(fn: (p: { clips: { id: string; transform?: object }[] }) => unknown): void } } }).__editor;
+    ed.getState().apply((p) => ({ ...p, clips: p.clips.map((c) => (c.id === id ? { ...c, transform: { ...c.transform, y: 100 } } : c)) }));
+  }, text.id);
+  await page.getByTestId('reset-clip').click();
+  s = await state(page);
+  expect(s.clips.find((c) => c.id === text.id)!.transform!.y).toBeCloseTo(before.y, 0);
+
+  await page.evaluate(() => (window as unknown as { __editor: { getState(): { setTime(t: number): void } } }).__editor.getState().setTime(3));
+  await page.waitForTimeout(900);
+  await page.screenshot({ path: 'test-results/moldura-faixa.png' });
 });

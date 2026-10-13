@@ -3,29 +3,16 @@
  * acontece no canvas e na timeline. Aqui ficam ajustes finos e propriedades.
  */
 import { useState, type ReactNode } from 'react';
-import type { Animation, BlurClip, Clip, Project, ShapeClip, SponsorsClip, TextClip, VideoClip, VisualClip } from '../../core/model';
-import { ANIM_TYPES, FORMATS, isVisual } from '../../core/model';
-import { HEADLINE_PRESETS, getPreset } from '../../core/presets';
-import { BRAND_SWATCHES } from '../../core/brand';
+import type { BlurClip, Clip, FrameClip, Project, ShapeClip, SponsorsClip, TextClip, VideoClip, VisualClip } from '../../core/model';
+import { FORMATS, isVisual } from '../../core/model';
+import { getPreset } from '../../core/presets';
+import { getFrame } from '../../core/frames';
+import { BRAND_SWATCHES, PN } from '../../core/brand';
 import { clearKeyframes, effectiveTransform, patchClip, setTransformAt, toggleKeyframeAt } from '../../core/edit';
 import { setSpeed, trimEnd } from '../../core/timeline';
 import { getEditor, useEditor } from '../../state/store';
-import { detachAudio, fitSelection } from '../commands';
+import { detachAudio, fitSelection, resetClip } from '../commands';
 import { IconClose, IconKeyframe } from '../icons';
-
-const ANIM_LABEL: Record<Animation['type'], string> = {
-  none: 'Nenhuma',
-  preset: 'Do preset',
-  fade: 'Esmaecer',
-  'slide-up': 'Subir',
-  'slide-down': 'Descer',
-  'slide-left': 'Da direita',
-  'slide-right': 'Da esquerda',
-  'zoom-in': 'Aproximar',
-  'zoom-out': 'Afastar',
-  wipe: 'Cortina',
-  pop: 'Saltar',
-};
 
 export function Inspector({ onClose }: { onClose: () => void }) {
   const project = useEditor((s) => s.project)!;
@@ -44,28 +31,35 @@ export function Inspector({ onClose }: { onClose: () => void }) {
   const clip = clips[0]!;
   return (
     <div className="insp" key={clip.id}>
-      <InspHead title={clip.type === 'text' ? getPreset(clip.preset).name : clip.name} onClose={onClose} />
+      <InspHead title={clip.type === 'text' ? getPreset(clip.preset).name : clip.name} onClose={onClose} onReset={() => resetClip(clip.id)} />
       {clip.type === 'text' && <TextSection clip={clip} />}
+      {clip.type === 'frame' && <FrameSection clip={clip} />}
       {clip.type === 'video' && <VideoSection clip={clip} />}
       {clip.type === 'image' && <ImageSection />}
       {clip.type === 'blur' && <BlurSection clip={clip} />}
       {clip.type === 'sponsors' && <SponsorsSection clip={clip} />}
       {clip.type === 'shape' && <ShapeSection clip={clip} />}
       {(clip.type === 'video' || clip.type === 'audio') && <AudioSection clip={clip} />}
-      {isVisual(clip) && <TransformSection clip={clip} time={time} />}
-      {isVisual(clip) && <AnimSection clip={clip} />}
+      {isVisual(clip) && clip.type !== 'frame' && <TransformSection clip={clip} time={time} />}
       <TimingSection clip={clip} />
     </div>
   );
 }
 
-function InspHead({ title, onClose }: { title: string; onClose: () => void }) {
+function InspHead({ title, onClose, onReset }: { title: string; onClose: () => void; onReset?: () => void }) {
   return (
     <div className="insp-head">
       <h3 className="ellipsis">{title}</h3>
-      <button className="icon-btn show-sm" onClick={onClose} aria-label="Fechar ajustes">
-        <IconClose />
-      </button>
+      <div className="row-gap">
+        {onReset && (
+          <button className="btn sm ghost" onClick={onReset} title="Voltar à configuração padrão do template" data-testid="reset-clip">
+            Restaurar padrão
+          </button>
+        )}
+        <button className="icon-btn show-sm" onClick={onClose} aria-label="Fechar ajustes">
+          <IconClose />
+        </button>
+      </div>
     </div>
   );
 }
@@ -185,30 +179,35 @@ function Seg<T extends string>({ value, options, onChange }: { value: T; options
 
 // ---------------------------------------------------------------------------
 
+function FrameSection({ clip }: { clip: FrameClip }) {
+  const def = getFrame(clip.frame);
+  return (
+    <Section title="Moldura">
+      <p className="hint">{def.description} Cores e logo seguem o padrão Primeiras Notícias. Para trocar, escolha outra moldura no painel Manchetes.</p>
+      {def.ticker && (
+        <label className="field">
+          <span>Texto do letreiro</span>
+          <textarea className="input" rows={2} value={clip.text} onChange={(e) => patch(clip.id, { text: e.target.value } as Partial<FrameClip>, `ft-${clip.id}`)} />
+        </label>
+      )}
+    </Section>
+  );
+}
+
 function TextSection({ clip }: { clip: TextClip }) {
   const preset = getPreset(clip.preset);
   const setField = (k: keyof TextClip['fields'], v: string) => patch(clip.id, { fields: { ...clip.fields, [k]: v } } as Partial<TextClip>, `f-${clip.id}-${k}`);
   const setStyle = (v: Partial<TextClip['style']>, merge?: string) => patch(clip.id, { style: { ...clip.style, ...v } } as Partial<TextClip>, merge);
+  if (preset.uses.length === 0) {
+    return (
+      <Section title="Selo">
+        <p className="hint">Selo oficial com logo, símbolo do Instagram e {PN.handle}. Posicione e redimensione direto no vídeo.</p>
+      </Section>
+    );
+  }
   return (
     <>
       <Section title="Texto">
-        <label className="field">
-          <span>Estilo</span>
-          <select
-            className="input"
-            value={clip.preset}
-            onChange={(e) => {
-              const np = getPreset(e.target.value);
-              patch(clip.id, { preset: np.id, style: { ...np.style }, animIn: { ...np.animIn }, animOut: { ...np.animOut }, name: np.name } as Partial<TextClip>);
-            }}
-          >
-            {HEADLINE_PRESETS.map((p) => (
-              <option key={p.id} value={p.id}>
-                {p.name}
-              </option>
-            ))}
-          </select>
-        </label>
         {preset.uses.includes('kicker') && (
           <label className="field">
             <span>Chapéu / selo</span>
@@ -227,23 +226,7 @@ function TextSection({ clip }: { clip: TextClip }) {
         )}
         <p className="hint">Use *asteriscos* para destacar trechos na cor de destaque.</p>
       </Section>
-      <Section title="Aparência">
-        <div className="field">
-          <span>Placa</span>
-          <Swatches value={clip.style.primary} onChange={(c) => setStyle({ primary: c })} />
-        </div>
-        <div className="field">
-          <span>Texto</span>
-          <Swatches value={clip.style.text} onChange={(c) => setStyle({ text: c })} />
-        </div>
-        <div className="field">
-          <span>Destaque</span>
-          <Swatches value={clip.style.highlight} onChange={(c) => setStyle({ highlight: c })} />
-        </div>
-        <div className="field">
-          <span>Detalhe</span>
-          <Swatches value={clip.style.accent} onChange={(c) => setStyle({ accent: c })} />
-        </div>
+      <Section title="Texto · formatação">
         <Slider label="Corpo" value={clip.style.fontScale} min={0.4} max={2} step={0.05} onChange={(v) => setStyle({ fontScale: v }, `fs-${clip.id}`)} format={(v) => `${Math.round(v * 100)}%`} />
         <div className="row-gap">
           <Seg
@@ -280,19 +263,6 @@ function VideoSection({ clip }: { clip: VideoClip }) {
             Espelhar
           </button>
         </div>
-        <div className="field">
-          <span>Fundo atrás do vídeo</span>
-          <Seg
-            value={clip.backdrop}
-            options={[
-              { v: 'none', label: 'Nenhum' },
-              { v: 'blur', label: 'Desfocado' },
-              { v: 'color', label: 'Cor' },
-            ]}
-            onChange={(v) => patch(clip.id, { backdrop: v } as Partial<VideoClip>)}
-          />
-        </div>
-        {clip.backdrop === 'color' && <Swatches value={clip.backdropColor} onChange={(c) => patch(clip.id, { backdropColor: c } as Partial<VideoClip>)} />}
       </Section>
       <Section title="Ajustes de imagem">
         <Slider label="Brilho" value={clip.adjust.brightness} min={0.3} max={2} step={0.01} onChange={(v) => adj('brightness', v)} />
@@ -464,37 +434,6 @@ function TransformSection({ clip, time }: { clip: VisualClip; time: number }) {
   );
 }
 
-function AnimSection({ clip }: { clip: VisualClip }) {
-  const types = ANIM_TYPES.filter((t) => t !== 'preset' || clip.type === 'text');
-  const setA = (k: 'animIn' | 'animOut', v: Partial<Animation>, merge?: string) => patch(clip.id, { [k]: { ...clip[k], ...v } } as Partial<Clip>, merge);
-  return (
-    <Section title="Animação">
-      {(['animIn', 'animOut'] as const).map((k) => (
-        <div key={k} className="anim-row">
-          <span className="anim-label">{k === 'animIn' ? 'Entrada' : 'Saída'}</span>
-          <select className="input" value={clip[k].type} onChange={(e) => setA(k, { type: e.target.value as Animation['type'] })}>
-            {types.map((t) => (
-              <option key={t} value={t}>
-                {ANIM_LABEL[t]}
-              </option>
-            ))}
-          </select>
-          <input
-            type="range"
-            min={0.1}
-            max={3}
-            step={0.05}
-            value={clip[k].duration}
-            disabled={clip[k].type === 'none'}
-            onChange={(e) => setA(k, { duration: Number(e.target.value) }, `ad-${clip.id}-${k}`)}
-            aria-label="Duração"
-          />
-          <span className="slider-val">{clip[k].duration.toFixed(1)} s</span>
-        </div>
-      ))}
-    </Section>
-  );
-}
 
 function TimingSection({ clip }: { clip: Clip }) {
   return (
@@ -552,9 +491,6 @@ function ProjectInspector({ project }: { project: Project }) {
           options={['24', '25', '30', '60'].map((v) => ({ v, label: v }))}
           onChange={(v) => apply((p) => ({ ...p, fps: Number(v) as Project['fps'] }))}
         />
-      </Section>
-      <Section title="Cor de fundo">
-        <Swatches value={project.background} onChange={(c) => apply((p) => ({ ...p, background: c }))} />
       </Section>
       <Section title="Atalhos">
         <ul className="shortcuts">

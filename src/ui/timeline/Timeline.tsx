@@ -530,6 +530,7 @@ const TYPE_LABEL: Record<Clip['type'], string> = {
   blur: 'Desfoque',
   sponsors: 'Oferecimento',
   shape: 'Forma',
+  frame: 'Moldura',
 };
 
 const ClipView = memo(function ClipView({

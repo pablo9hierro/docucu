@@ -6,6 +6,7 @@ import type { MediaAsset, Project, VideoClip } from '../core/model';
 import { evaluateScene } from '../core/scene';
 import { renderFrame, type MediaSources } from '../render/renderer';
 import { ensureFonts } from '../render/fonts';
+import { ensureBrandAssets } from '../render/brandAssets';
 import { exportsApi, type ExportSettings } from '../platform/api';
 
 export interface ExportProgress {
@@ -64,7 +65,7 @@ export async function runExport(
   signal: AbortSignal,
 ): Promise<{ id: string; file: string }> {
   onProgress({ phase: 'preparing', frame: 0, total: 0, fps: 0 });
-  await ensureFonts();
+  await Promise.all([ensureFonts(), ensureBrandAssets()]);
 
   // prepara um elemento por clipe de vídeo e todas as imagens usadas
   const videos = new Map<string, HTMLVideoElement>();

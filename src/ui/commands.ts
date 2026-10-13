@@ -11,17 +11,21 @@ import {
   createVideoClip,
   fitContain,
   fitCover,
+  NEUTRAL_ADJUST,
 } from '../core/factory';
 import { uid } from '../core/id';
 import { clipEnd, deleteClips, duplicateClip, findClip, placeClip, projectDuration, splitClip } from '../core/timeline';
-import { applyTemplate } from '../core/templates';
+import { activeFrame, applyFrame, coverWindow, getFrame } from '../core/frames';
 import { getEditor } from '../state/store';
 import { preview } from '../engine/preview';
 import { effectiveTransform } from '../core/edit';
 
 const st = getEditor;
 
-/** Adiciona mídia: vídeo vai para a trilha principal ao fim do conteúdo (ou na agulha). */
+/**
+ * Adiciona mídia EXATAMENTE na agulha (ou no ponto de soltura). Vídeo tenta a
+ * trilha principal; se ali já houver vídeo naquele instante, vai para uma camada.
+ */
 export function addMedia(m: MediaAsset, at?: number) {
   const s = st();
   if (!s.project) return;
@@ -31,16 +35,18 @@ export function addMedia(m: MediaAsset, at?: number) {
   }
   let clip: Clip;
   const p = s.project;
+  const t = at ?? s.time;
   if (m.kind === 'video') {
-    const main = p.tracks.find((t) => t.kind === 'visual');
-    const mainEnd = Math.max(0, ...p.clips.filter((c) => c.trackId === main?.id).map(clipEnd));
-    clip = createVideoClip(p, m, at ?? mainEnd);
+    const main = p.tracks.find((tr) => tr.kind === 'visual');
+    clip = createVideoClip(p, m, t);
+    const frame = activeFrame(p);
+    if (frame) clip.transform = coverWindow(getFrame(frame.frame), p.width, p.height, clip.transform.width / clip.transform.height);
     s.apply((pr) => placeClip(pr, clip, main?.id));
   } else if (m.kind === 'image') {
-    clip = createImageClip(p, m, at ?? s.time);
+    clip = createImageClip(p, m, t);
     s.apply((pr) => placeClip(pr, clip));
   } else {
-    clip = createAudioClip(p, m, at ?? s.time);
+    clip = createAudioClip(p, m, t);
     s.apply((pr) => placeClip(pr, clip));
   }
   s.select([clip.id]);
@@ -79,19 +85,74 @@ export function addBlur(rect: { x: number; y: number; width: number; height: num
   s.set('tool', 'select');
 }
 
-export function applyTemplateCmd(id: string, logo?: MediaAsset) {
+/** Aplica uma moldura: um único clipe na timeline, substituindo a moldura anterior. */
+export function applyFrameCmd(id: string) {
   const s = st();
   if (!s.project) return;
-  if (!s.project.clips.some((c) => c.type === 'video')) {
-    s.notify('Adicione um vídeo antes de aplicar o modelo.', 'info');
-  }
-  let added: string[] = [];
+  let clipId = '';
   s.apply((p) => {
-    const r = applyTemplate(p, id, { logo });
-    added = r.addedIds;
+    const r = applyFrame(p, id);
+    clipId = r.clipId;
     return r.project;
   });
-  s.select(added.slice(0, 1));
+  s.select([clipId]);
+}
+
+/** Volta o item selecionado à configuração padrão do seu template/tipo. */
+export function resetClip(id: string) {
+  const s = st();
+  const p = s.project;
+  if (!p) return;
+  const c = findClip(p, id);
+  if (!c) return;
+  const frame = activeFrame(p);
+  const keep = { id: c.id, trackId: c.trackId, start: c.start, duration: c.duration, name: c.name };
+  let next: Clip = c;
+  switch (c.type) {
+    case 'text': {
+      const d = createTextClip(p, c.preset, c.start);
+      next = { ...d, ...keep, name: d.name, fields: c.fields };
+      break;
+    }
+    case 'video': {
+      const m = s.media[c.mediaId];
+      const ratio = m?.width ? m.width / m.height : c.transform.width / c.transform.height;
+      const tr = frame ? coverWindow(getFrame(frame.frame), p.width, p.height, ratio) : fitContain(ratio * 1000, 1000, p.width, p.height);
+      const span = c.duration * c.speed;
+      next = { ...c, transform: tr, keyframes: [], adjust: { ...NEUTRAL_ADJUST }, flipH: false, volume: 1, muted: false, fadeIn: 0, fadeOut: 0, speed: 1, duration: Math.min(span, c.sourceDuration - c.sourceIn || span), backdrop: 'none', animIn: { type: 'none', duration: 1 }, animOut: { type: 'none', duration: 1 } };
+      break;
+    }
+    case 'image': {
+      const m = s.media[c.mediaId];
+      const d = m ? createImageClip(p, m, c.start) : c;
+      next = { ...c, transform: d.transform, keyframes: [], adjust: { ...NEUTRAL_ADJUST }, flipH: false };
+      break;
+    }
+    case 'audio': {
+      const span = c.duration * c.speed;
+      next = { ...c, volume: 1, muted: false, fadeIn: 0, fadeOut: 0, speed: 1, duration: span };
+      break;
+    }
+    case 'blur':
+      next = { ...c, intensity: 60, mode: 'blur', keyframes: [], transform: { ...c.transform, rotation: 0, opacity: 1 } };
+      break;
+    case 'frame': {
+      s.apply((pr) => {
+        const r = applyFrame(pr, c.frame);
+        return { ...r.project, clips: r.project.clips.map((x) => (x.id === r.clipId ? { ...x, ...keep } : x)) };
+      });
+      s.select([id]);
+      return;
+    }
+    case 'sponsors':
+      next = { ...c, transform: createSponsorsClip(p, [], c.start).transform, keyframes: [] };
+      break;
+    case 'shape':
+      next = { ...c, transform: createShapeClip(p, c.shape, c.start).transform, keyframes: [] };
+      break;
+  }
+  s.apply((pr) => ({ ...pr, clips: pr.clips.map((x) => (x.id === id ? next : x)) }));
+  s.notify('Configuração padrão restaurada');
 }
 
 export function splitAtPlayhead() {

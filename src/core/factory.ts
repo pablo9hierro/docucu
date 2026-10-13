@@ -31,7 +31,7 @@ export function createProject(name: string, format: FormatId, fps: Project['fps'
     width: f.width,
     height: f.height,
     fps,
-    background: '#000000',
+    background: PN.navy,
     tracks: [newTrack('visual', 'Principal'), newTrack('visual', 'Camada 2'), newTrack('audio', 'Áudio 1')],
     clips: [],
   };
@@ -51,11 +51,18 @@ export function fitCover(mw: number, mh: number, W: number, H: number): Transfor
 
 const noAnim = { type: 'none' as const, duration: 0.5 };
 
-/** Duração padrão de um elemento gráfico: até o fim do conteúdo, ou 5 s. */
-function graphicDuration(p: Project, start: number, preferred: number | null): number {
-  const end = projectDuration(p);
-  if (preferred != null) return preferred;
-  return end - start > 0.5 ? end - start : 5;
+/** Duração máxima de um elemento recém-inserido; para estender, arraste a borda na timeline. */
+export const MAX_SPAWN_SECONDS = 15;
+
+/**
+ * Duração padrão de um elemento inserido na agulha: no máximo 15 s (ou a
+ * duração própria do preset) e nunca além do fim do vídeo — inserir um
+ * elemento não pode aumentar o vídeo exportado.
+ */
+export function graphicDuration(p: Project, start: number, preferred: number | null): number {
+  const cap = Math.min(preferred ?? MAX_SPAWN_SECONDS, MAX_SPAWN_SECONDS);
+  const until = projectDuration(p) - start;
+  return until > 0.5 ? Math.min(cap, until) : cap;
 }
 
 export function createVideoClip(p: Project, m: MediaAsset, start: number): VideoClip {

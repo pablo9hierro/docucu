@@ -39,16 +39,17 @@ const base: TextStyle = {
 const presetIn: Animation = { type: 'preset', duration: 0.9 };
 const presetOut: Animation = { type: 'preset', duration: 0.5 };
 
-export const HEADLINE_PRESETS: HeadlinePreset[] = [
+const RAW_PRESETS: HeadlinePreset[] = [
   {
     id: 'pn-faixa',
     name: 'Faixa PN',
     category: 'manchete',
-    description: 'Faixa inferior em degradê navy com fio azul, manchete centralizada e assinatura PN.',
+    description: 'Faixa inferior em degradê navy com fio azul, manchete centralizada e logo PN.',
     size: { w: 1, h: 0.27 },
-    pos: { x: 0.5, y: 0.83 },
-    fields: { kicker: '', title: 'Homem deixa celular cair no mar e câmera registra cenas inesperadas', subtitle: PN.handle },
-    uses: ['title', 'subtitle'],
+    // termina em ~92% da altura, deixando o @perfil das molduras visível embaixo
+    pos: { x: 0.5, y: 0.79 },
+    fields: { kicker: '', title: 'Homem deixa celular cair no mar e câmera registra cenas inesperadas', subtitle: '' },
+    uses: ['title'],
     style: { ...base },
     animIn: presetIn,
     animOut: presetOut,
@@ -230,11 +231,12 @@ export const HEADLINE_PRESETS: HeadlinePreset[] = [
     id: 'pn-perfil',
     name: '@perfil',
     category: 'selo',
-    description: 'Assinatura com o perfil da página.',
-    size: { w: 0.6, h: 0.035 },
+    description: 'Logo PN, símbolo do Instagram e @primeirasnoticias_.',
+    size: { w: 0.72, h: 0.042 },
     pos: { x: 0.5, y: 0.93 },
     fields: { kicker: '', title: PN.handle, subtitle: '' },
-    uses: ['title'],
+    // o perfil oficial é fixo
+    uses: [],
     style: { ...base, uppercase: false },
     animIn: { type: 'fade', duration: 0.4 },
     animOut: { type: 'fade', duration: 0.4 },
@@ -269,6 +271,15 @@ export const HEADLINE_PRESETS: HeadlinePreset[] = [
     defaultDuration: 4,
   },
 ];
+
+/** Animação padrão da marca: entrada e saída de 1 segundo, sem opção de troca. */
+export const ANIM_SECONDS = 1;
+
+export const HEADLINE_PRESETS: HeadlinePreset[] = RAW_PRESETS.map((p) => ({
+  ...p,
+  animIn: { ...p.animIn, duration: ANIM_SECONDS },
+  animOut: { ...p.animOut, duration: ANIM_SECONDS },
+}));
 
 export function getPreset(id: string): HeadlinePreset {
   return HEADLINE_PRESETS.find((p) => p.id === id) ?? HEADLINE_PRESETS[HEADLINE_PRESETS.length - 1]!;

@@ -770,6 +770,40 @@ input[type='range'] {
   border-radius: var(--r-sm);
   display: block;
 }
+.frame-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(84px, 1fr));
+  gap: 8px;
+}
+.frame-card {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 5px;
+  padding: 5px 4px;
+  border: 1px solid transparent;
+  border-radius: var(--r);
+  background: transparent;
+  font-size: 11px;
+  color: var(--text-2);
+  text-align: center;
+  line-height: 1.25;
+}
+.frame-card:hover {
+  border-color: var(--line-2);
+  background: var(--panel-2);
+  color: var(--text);
+}
+.frame-card.on {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+  color: var(--text);
+}
+.frame-thumb {
+  display: block;
+  border-radius: 3px;
+  box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.08);
+}
 .template-list {
   display: flex;
   flex-direction: column;
@@ -1326,6 +1360,7 @@ input[type='range'] {
 .clip-blur { background: var(--clip-blur); border-style: dashed; }
 .clip-sponsors { background: var(--clip-sponsors); }
 .clip-shape { background: var(--clip-shape); }
+.clip-frame { background: #1d3f73; background-image: repeating-linear-gradient(135deg, rgba(255,255,255,0.05) 0 8px, transparent 8px 16px); }
 .filmstrip {
   position: absolute;
   inset: 0;
@@ -1514,6 +1549,53 @@ input[type='range'] {
 }
 .export-history .list-row {
   margin-bottom: 3px;
+}
+.dialog-back {
+  z-index: 70;
+  animation: fade-in 0.12s ease-out;
+}
+.dialog {
+  width: min(380px, 100%);
+  background: var(--panel);
+  border: 1px solid var(--line-2);
+  border-top: 3px solid var(--accent);
+  border-radius: 8px;
+  padding: 16px 18px 14px;
+  box-shadow: 0 24px 60px rgba(0, 0, 0, 0.55);
+  animation: dialog-in 0.14s ease-out;
+}
+.dialog.danger {
+  border-top-color: var(--danger);
+}
+.dialog h3 {
+  font-size: 14.5px;
+  margin-bottom: 6px;
+}
+.dialog-msg {
+  margin: 0 0 4px;
+  color: var(--text-2);
+  font-size: 13px;
+  line-height: 1.5;
+}
+.dialog-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 16px;
+}
+.btn.danger {
+  background: var(--danger);
+  border-color: var(--danger);
+  color: #fff;
+}
+.btn.danger:hover:not(:disabled) {
+  background: #ff6b6b;
+}
+@keyframes fade-in {
+  from { opacity: 0; }
+}
+@keyframes dialog-in {
+  from { opacity: 0; transform: translateY(6px) scale(0.98); }
 }
 .toast {
   position: fixed;

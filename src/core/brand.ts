@@ -10,7 +10,7 @@ export const PN = {
   red: '#E0262E',
   white: '#FFFFFF',
   black: '#0A0A0A',
-  handle: '@primeirasnoticias',
+  handle: '@primeirasnoticias_',
   site: 'primeirasnoticias.com.br',
 } as const;
 

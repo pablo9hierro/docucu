@@ -2,10 +2,10 @@ import { useEffect, useRef, useState } from 'react';
 import { projectDuration } from '../core/timeline';
 import { getEditor, useEditor } from '../state/store';
 import { runExport, type ExportProgress } from '../engine/exporter';
-import { exportsApi, type ExportInfo } from '../platform/api';
+import { deviceStorage, exportsApi } from '../platform/api';
 import { stopPlayback } from './commands';
 import { formatTime } from './Transport';
-import { IconClose, IconFolder } from './icons';
+import { IconClose } from './icons';
 
 const QUALITY = [
   { id: 'high', label: 'Alta', crf: 16 },
@@ -20,15 +20,15 @@ export function ExportDialog({ onClose }: { onClose: () => void }) {
   const [quality, setQuality] = useState<(typeof QUALITY)[number]['id']>('std');
   const [fps, setFps] = useState<number>(project.fps);
   const [progress, setProgress] = useState<ExportProgress | null>(null);
-  const [result, setResult] = useState<{ id: string; file: string } | null>(null);
+  const [result, setResult] = useState<{ file: string; blob: Blob; url: string; seconds: number } | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [history, setHistory] = useState<ExportInfo[]>([]);
   const abort = useRef<AbortController | null>(null);
   const started = useRef(0);
 
-  useEffect(() => {
-    exportsApi.list(project.id).then((l) => setHistory(l.filter((x) => x.status === 'done').slice(0, 5)), () => undefined);
-  }, [project.id, result]);
+  // libera a prévia da memória ao fechar
+  useEffect(() => () => {
+    if (result) URL.revokeObjectURL(result.url);
+  }, [result]);
 
   const scale = res === 'full' ? 1 : 720 / Math.min(project.width, project.height);
   const width = Math.round((project.width * scale) / 2) * 2;
@@ -49,7 +49,11 @@ export function ExportDialog({ onClose }: { onClose: () => void }) {
         setProgress,
         ctrl.signal,
       );
-      setResult(r);
+      // entrega ao dispositivo (pasta Downloads) e apaga a cópia interna do app
+      const blob = await exportsApi.fetchFile(r.id);
+      await deviceStorage.saveVideo(blob, r.file);
+      await exportsApi.discard(r.id).catch(() => undefined);
+      setResult({ file: r.file, blob, url: URL.createObjectURL(blob), seconds: (performance.now() - started.current) / 1000 });
     } catch (e) {
       if ((e as Error).name !== 'AbortError') setError((e as Error).message);
       setProgress(null);
@@ -143,16 +147,14 @@ export function ExportDialog({ onClose }: { onClose: () => void }) {
 
             {result && (
               <div className="export-done" data-testid="export-done">
-                <video src={exportsApi.fileUrl(result.id, true)} controls playsInline className="export-video" />
+                <video src={result.url} controls playsInline className="export-video" />
                 <p className="small">
-                  Pronto: <strong>{result.file}</strong> · {((performance.now() - started.current) / 1000).toFixed(0)} s
+                  Salvo na memória do seu aparelho, pasta <strong>Downloads</strong>: <strong>{result.file}</strong> · {result.seconds.toFixed(0)} s
                 </p>
-                <div className="row-gap">
-                  <a className="btn primary" href={exportsApi.fileUrl(result.id)} download>
-                    Baixar
-                  </a>
-                  <button className="btn" onClick={() => void exportsApi.reveal(result.id)}>
-                    <IconFolder /> Mostrar na pasta
+                <p className="muted small">O app não guarda cópia do vídeo final.</p>
+                <div className="row-gap wrap">
+                  <button className="btn primary" onClick={() => void deviceStorage.saveVideo(result.blob, result.file)}>
+                    Baixar novamente
                   </button>
                   <button className="btn ghost" onClick={() => setResult(null)}>
                     Nova exportação
@@ -161,20 +163,6 @@ export function ExportDialog({ onClose }: { onClose: () => void }) {
               </div>
             )}
           </>
-        )}
-
-        {history.length > 0 && !busy && (
-          <div className="export-history">
-            <h4>Exportações anteriores</h4>
-            {history.map((h) => (
-              <div key={h.id} className="list-row">
-                <span className="ellipsis">{h.fileName}</span>
-                <a className="btn sm ghost" href={exportsApi.fileUrl(h.id)} download>
-                  Baixar
-                </a>
-              </div>
-            ))}
-          </div>
         )}
       </div>
     </div>

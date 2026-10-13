@@ -5,7 +5,7 @@
  * usado pelo player (src/core/audio.ts).
  */
 import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process';
-import { existsSync, unlinkSync } from 'node:fs';
+import { existsSync, readdirSync, unlinkSync } from 'node:fs';
 import path from 'node:path';
 import type { Project } from '../src/core/model';
 import { buildAudioPlan, buildFfmpegAudioGraph } from '../src/core/audio';
@@ -189,6 +189,27 @@ export interface ExportRow {
   settings: string;
   created_at: string;
   finished_at: string | null;
+}
+
+/**
+ * O vídeo final vai para a memória do dispositivo (pasta Downloads). Depois que
+ * o navegador recebe o arquivo, a cópia interna do app é apagada.
+ */
+export function deleteExportFile(id: string) {
+  const r = getExport(id);
+  if (r?.file && existsSync(r.file)) unlinkSync(r.file);
+  getDb().prepare("UPDATE exports SET file = NULL, status = CASE status WHEN 'done' THEN 'delivered' ELSE status END WHERE id = ?").run(id);
+}
+
+/** Remove sobras de exportações interrompidas (o app não guarda vídeos finais). */
+export function cleanupExportDir() {
+  for (const f of readdirSync(EXPORT_DIR)) {
+    try {
+      unlinkSync(path.join(EXPORT_DIR, f));
+    } catch {
+      /* em uso */
+    }
+  }
 }
 
 export function getExport(id: string): ExportRow | undefined {

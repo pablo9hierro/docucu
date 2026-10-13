@@ -23,6 +23,8 @@ import { renderFrame } from '../../render/renderer';
 import { preview } from '../../engine/preview';
 import { getEditor, useEditor } from '../../state/store';
 import { addBlur } from '../commands';
+import { getPreset } from '../../core/presets';
+import { ensureBrandAssets, onBrandLoaded } from '../../render/brandAssets';
 import { TextEditOverlay } from './TextEditOverlay';
 
 let liveCanvas: HTMLCanvasElement | null = null;
@@ -102,11 +104,14 @@ export function Stage() {
       if (s.project !== p.project || s.time !== p.time || s.media !== p.media) needsRender.current = true;
     });
     const unsubPreview = preview.onInvalidate(() => (needsRender.current = true));
+    const unsubBrand = onBrandLoaded(() => (needsRender.current = true));
+    void ensureBrandAssets();
     void document.fonts.ready.then(() => (needsRender.current = true));
     return () => {
       cancelAnimationFrame(raf);
       unsubStore();
       unsubPreview();
+      unsubBrand();
       if (liveCanvas === canvasRef.current) liveCanvas = null;
     };
   }, []);
@@ -142,7 +147,8 @@ function Interaction({ project, scale }: { project: Project; scale: number }) {
   };
 
   const lockedTracks = new Set(project.tracks.filter((t) => t.locked).map((t) => t.id));
-  const items = evaluateScene(project, time).filter((it) => !lockedTracks.has(it.clip.trackId));
+  // a moldura cobre o quadro todo: não participa da seleção no canvas (é selecionada pela timeline)
+  const items = evaluateScene(project, time).filter((it) => !lockedTracks.has(it.clip.trackId) && it.clip.type !== 'frame');
 
   const hitAt = (pt: { x: number; y: number }): VisualClip | null => {
     const pad = 4 / scale;
@@ -203,7 +209,7 @@ function Interaction({ project, scale }: { project: Project; scale: number }) {
     }
     // toque duplo / duplo clique em texto → edição inline
     const now = performance.now();
-    if (hit.type === 'text' && lastTap.current?.id === hit.id && now - lastTap.current.at < 350) {
+    if (hit.type === 'text' && getPreset(hit.preset).uses.length > 0 && lastTap.current?.id === hit.id && now - lastTap.current.at < 350) {
       s.select([hit.id]);
       s.set('editingTextId', hit.id);
       lastTap.current = null;
@@ -378,7 +384,7 @@ function Interaction({ project, scale }: { project: Project; scale: number }) {
       onPointerCancel={(e) => finish(e, true)}
       onDoubleClick={(e) => {
         const hit = hitAt(toFrame(e.clientX, e.clientY));
-        if (hit?.type === 'text') getEditor().set('editingTextId', hit.id);
+        if (hit?.type === 'text' && getPreset(hit.preset).uses.length > 0) getEditor().set('editingTextId', hit.id);
       }}
       data-testid="stage-overlay"
     >

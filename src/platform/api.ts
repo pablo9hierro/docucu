@@ -61,8 +61,35 @@ export interface ExportService {
   get(id: string): Promise<ExportInfo>;
   list(projectId?: string): Promise<ExportInfo[]>;
   fileUrl(id: string, inline?: boolean): string;
-  reveal(id: string): Promise<void>;
+  /** baixa o vídeo final do processador (para entregar ao dispositivo) */
+  fetchFile(id: string): Promise<Blob>;
+  /** apaga a cópia interna depois da entrega */
+  discard(id: string): Promise<void>;
 }
+
+/**
+ * Armazenamento do DISPOSITIVO (não do app). No navegador do PC ou do Android,
+ * salvar dispara o download para a pasta Downloads do aparelho. No futuro app
+ * nativo, esta interface grava direto na galeria/Downloads (MediaStore).
+ */
+export interface DeviceStorage {
+  saveVideo(blob: Blob, fileName: string): Promise<void>;
+}
+
+export const deviceStorage: DeviceStorage = {
+  async saveVideo(blob, fileName) {
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = fileName;
+    a.rel = 'noopener';
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    // libera a memória do navegador depois que o download começou
+    setTimeout(() => URL.revokeObjectURL(url), 60_000);
+  },
+};
 
 async function req<T>(url: string, init?: RequestInit): Promise<T> {
   let res: Response;
@@ -157,8 +184,13 @@ export const exportsApi: ExportService = {
   get: (id) => req(`/api/exports/${id}`),
   list: (projectId) => req(`/api/exports${projectId ? `?projectId=${projectId}` : ''}`),
   fileUrl: (id, inline) => `/api/exports/${id}/file${inline ? '?inline=1' : ''}`,
-  reveal: async (id) => {
-    await req(`/api/exports/${id}/reveal`, { method: 'POST' });
+  fetchFile: async (id) => {
+    const res = await fetch(`/api/exports/${id}/file?inline=1`);
+    if (!res.ok) throw new Error('Não foi possível obter o vídeo exportado.');
+    return res.blob();
+  },
+  discard: async (id) => {
+    await req(`/api/exports/${id}/file`, { method: 'DELETE' });
   },
 };
 

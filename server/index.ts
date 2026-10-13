@@ -4,7 +4,6 @@
  */
 import express, { type NextFunction, type Request, type Response } from 'express';
 import { existsSync, readFileSync } from 'node:fs';
-import { execFile } from 'node:child_process';
 import path from 'node:path';
 import { ProjectSchema } from '../src/core/model';
 import { API_PORT, ensureDirs, ffmpegPaths, ROOT } from './config';
@@ -21,9 +20,20 @@ import {
   playablePath,
   saveBrandUpload,
 } from './media';
-import { cancelExport, finishExport, getExport, listExports, pushFrames, startExport, type ExportSettings } from './exports';
+import {
+  cancelExport,
+  cleanupExportDir,
+  deleteExportFile,
+  finishExport,
+  getExport,
+  listExports,
+  pushFrames,
+  startExport,
+  type ExportSettings,
+} from './exports';
 
 ensureDirs();
+cleanupExportDir();
 const db = getDb();
 const app = express();
 app.disable('x-powered-by');
@@ -239,12 +249,8 @@ app.get('/api/exports/:id/file', (req, res) => {
   else res.download(r.file, path.basename(r.file));
 });
 
-app.post('/api/exports/:id/reveal', (req, res) => {
-  const r = getExport(req.params.id);
-  if (!r?.file || !existsSync(r.file)) throw new HttpError(404, 'Arquivo não disponível.');
-  if (process.platform === 'win32') execFile('explorer.exe', [`/select,${r.file}`]);
-  else if (process.platform === 'darwin') execFile('open', ['-R', r.file]);
-  else execFile('xdg-open', [path.dirname(r.file)]);
+app.delete('/api/exports/:id/file', (req, res) => {
+  deleteExportFile(req.params.id);
   res.json({ ok: true });
 });
 

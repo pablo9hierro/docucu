@@ -2,11 +2,13 @@
  * Renderizador único da cena. O preview e a exportação chamam `renderFrame`
  * com o mesmo projeto e o mesmo tempo — o que se vê é o que se exporta.
  */
-import type { Adjust, BlurClip, ImageClip, Project, ShapeClip, SponsorsClip, VideoClip } from '../core/model';
+import type { Adjust, BlurClip, FrameClip, ImageClip, Project, ShapeClip, SponsorsClip, VideoClip } from '../core/model';
 import { evaluateScene, type SceneItem } from '../core/scene';
-import { drawHeadline } from './headlines';
+import { getFrame, frameWindow } from '../core/frames';
+import { drawHandle, drawHeadline, drawTicker } from './headlines';
+import { drawLogo, LOGO_RATIO } from './brandAssets';
 import { applyFont } from './text';
-import { FONTS } from '../core/brand';
+import { FONTS, PN } from '../core/brand';
 
 type C = CanvasRenderingContext2D;
 
@@ -133,8 +135,65 @@ function drawItem(ctx: C, project: Project, it: SceneItem, src: MediaSources, op
     case 'shape':
       drawShape(ctx, clip, w, h);
       break;
+    case 'frame':
+      ctx.translate(-w / 2, -h / 2);
+      drawFrame(ctx, clip, w, h, it.localT);
+      break;
   }
   ctx.restore();
+}
+
+/** Moldura da marca: fundo PN fora da janela, fios de acabamento, logo, @perfil e letreiro. */
+function drawFrame(ctx: C, clip: FrameClip, W: number, H: number, t: number) {
+  const def = getFrame(clip.frame);
+  const win = frameWindow(def, W, H);
+  const full = win.w >= W - 0.5 && win.h >= H - 0.5;
+  if (!full) {
+    ctx.save();
+    ctx.beginPath();
+    ctx.rect(0, 0, W, H);
+    ctx.rect(win.x, win.y, win.w, win.h);
+    ctx.clip('evenodd');
+    const g = ctx.createLinearGradient(0, 0, 0, H);
+    g.addColorStop(0, PN.deep);
+    g.addColorStop(0.5, PN.navy);
+    g.addColorStop(1, '#07142a');
+    ctx.fillStyle = g;
+    ctx.fillRect(0, 0, W, H);
+    // luz suave atrás da logo
+    const lg = ctx.createRadialGradient(def.logo.cx * W, def.logo.cy * H, 0, def.logo.cx * W, def.logo.cy * H, W * 0.55);
+    lg.addColorStop(0, 'rgba(56,182,255,0.28)');
+    lg.addColorStop(1, 'rgba(56,182,255,0)');
+    ctx.fillStyle = lg;
+    ctx.fillRect(0, 0, W, H);
+    ctx.restore();
+    // fios de acabamento nas bordas da janela
+    const t1 = Math.max(3, H * 0.003);
+    const t2 = Math.max(5, H * 0.005);
+    ctx.fillStyle = PN.sky;
+    ctx.fillRect(win.x, win.y - t2, win.w, t2);
+    ctx.fillRect(win.x, win.y + win.h, win.w, t2);
+    ctx.fillStyle = '#04101f';
+    ctx.fillRect(win.x, win.y - t2 - t1, win.w, t1);
+    ctx.fillRect(win.x, win.y + win.h + t2, win.w, t1);
+  }
+  const lw = def.logo.w * W;
+  const lh = lw / LOGO_RATIO.horizontal;
+  drawLogo(ctx, def.logo.cx * W - lw / 2, def.logo.cy * H - lh / 2, lh);
+  if (def.handle !== null) {
+    const hh = W * 0.075;
+    ctx.save();
+    ctx.translate(0, def.handle * H - hh / 2);
+    drawHandle(ctx, W, hh, 'center');
+    ctx.restore();
+  }
+  if (def.ticker) {
+    const th = W * 0.075;
+    ctx.save();
+    ctx.translate(0, H - th - H * 0.05);
+    drawTicker(ctx, W, th, clip.text, t);
+    ctx.restore();
+  }
 }
 
 function drawMedia(ctx: C, img: CanvasImageSource, w: number, h: number, adjust: Adjust, flip: boolean) {
