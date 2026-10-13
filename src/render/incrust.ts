@@ -118,9 +118,16 @@ export function incrust(ctx: C, area: IncrustArea, o: IncrustOptions) {
   if (phase !== null) {
     if (!glintCanvas) glintCanvas = document.createElement('canvas');
     const gc = glintCanvas;
-    gc.width = logo.width;
-    gc.height = logo.height;
+    // reaproveita o canvas (realocar a cada quadro custava ~25 ms) e calcula a luz em
+    // meia resolução: é um brilho suave em movimento, a diferença não aparece
+    const gw = Math.max(1, Math.round(logo.width / 2));
+    const gh = Math.max(1, Math.round(logo.height / 2));
+    if (gc.width !== gw || gc.height !== gh) {
+      gc.width = gw;
+      gc.height = gh;
+    }
     const g = gc.getContext('2d')!;
+    g.globalCompositeOperation = 'source-over';
     // faixa opaca preto → azul-claro → preto; multiplicada pela logo, só acende onde a logo brilha
     const cx = -0.3 * gc.width + phase * 1.6 * gc.width;
     const band = g.createLinearGradient(cx - gc.height * 0.5, 0, cx + gc.height * 0.5, gc.height);
@@ -130,9 +137,9 @@ export function incrust(ctx: C, area: IncrustArea, o: IncrustOptions) {
     g.fillStyle = band;
     g.fillRect(0, 0, gc.width, gc.height);
     g.globalCompositeOperation = 'multiply';
-    g.drawImage(logo, 0, 0);
+    g.drawImage(logo, 0, 0, gc.width, gc.height);
     g.globalCompositeOperation = 'destination-in';
-    g.drawImage(logo, 0, 0);
+    g.drawImage(logo, 0, 0, gc.width, gc.height);
     ctx.globalAlpha = Math.min(1, ctx.globalAlpha * 1.6);
     ctx.drawImage(gc, lx, ly, lw, lh);
   }

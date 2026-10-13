@@ -6,6 +6,7 @@
 import type { MediaAsset, Project, VideoClip } from '../core/model';
 import { evaluateScene } from '../core/scene';
 import type { MediaSources } from '../render/renderer';
+import { SequentialDecoder } from './sequentialDecoder';
 
 function loadVideo(url: string): Promise<HTMLVideoElement> {
   return new Promise((resolve, reject) => {
@@ -49,12 +50,17 @@ export interface FrameSource {
 
 export async function prepareFrameSource(project: Project, media: Record<string, MediaAsset>): Promise<FrameSource> {
   const videos = new Map<string, HTMLVideoElement>();
+  // caminho rápido: decodificação sequencial (mesmos quadros, sem reposicionar o vídeo)
+  const decoders = new Map<string, SequentialDecoder>();
+  const decoded = new Map<string, CanvasImageSource | null>();
   const images = new Map<string, HTMLImageElement>();
   for (const c of project.clips) {
     if (c.type === 'video') {
       const m = media[c.mediaId];
       if (!m) throw new Error(`Mídia ausente: ${c.name}`);
-      videos.set(c.id, await loadVideo(m.url));
+      const dec = await SequentialDecoder.create(m.url);
+      if (dec) decoders.set(c.id, dec);
+      else videos.set(c.id, await loadVideo(m.url));
     }
     const ids = c.type === 'image' ? [c.mediaId] : c.type === 'sponsors' ? c.mediaIds : [];
     for (const id of ids) {
@@ -64,7 +70,7 @@ export async function prepareFrameSource(project: Project, media: Record<string,
   }
   return {
     sources: {
-      video: (clip: VideoClip) => videos.get(clip.id) ?? null,
+      video: (clip: VideoClip) => (decoders.has(clip.id) ? (decoded.get(clip.id) ?? null) : (videos.get(clip.id) ?? null)),
       image: (id) => images.get(id) ?? null,
       size: (id) => {
         const i = images.get(id);
@@ -73,13 +79,20 @@ export async function prepareFrameSource(project: Project, media: Record<string,
     },
     async seek(t) {
       const active = evaluateScene(project, t).filter((it) => it.clip.type === 'video');
-      await Promise.all(active.map((it) => seekExact(videos.get(it.clip.id)!, it.mediaTime)));
+      await Promise.all(
+        active.map(async (it) => {
+          const dec = decoders.get(it.clip.id);
+          if (dec) decoded.set(it.clip.id, await dec.frameAt(it.mediaTime));
+          else await seekExact(videos.get(it.clip.id)!, it.mediaTime);
+        }),
+      );
     },
     dispose() {
       for (const v of videos.values()) {
         v.removeAttribute('src');
         v.load();
       }
+      for (const d of decoders.values()) d.dispose();
     },
   };
 }

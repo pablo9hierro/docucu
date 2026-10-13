@@ -6,7 +6,7 @@ import type { Adjust, BlurClip, FrameClip, ImageClip, Project, ShapeClip, Sponso
 import { evaluateScene, type SceneItem } from '../core/scene';
 import { getFrame, frameWindow } from '../core/frames';
 import { drawHandle, drawHeadline, drawTicker } from './headlines';
-import { drawLogo, LOGO_RATIO } from './brandAssets';
+import { brandImage, drawLogo, LOGO_RATIO } from './brandAssets';
 import { applyFont } from './text';
 import { FONTS, PN } from '../core/brand';
 
@@ -143,9 +143,45 @@ function drawItem(ctx: C, project: Project, it: SceneItem, src: MediaSources, op
   ctx.restore();
 }
 
-/** Moldura da marca: fundo PN fora da janela, fios de acabamento, logo, @perfil e letreiro. */
+/**
+ * A parte fixa da moldura (fundo, fios, logo, @perfil) é desenhada uma única vez
+ * por tamanho e reaproveitada a cada quadro — mesmo resultado, muito menos trabalho.
+ * Só o letreiro (que se move) é desenhado ao vivo.
+ */
+const frameCache = new Map<string, HTMLCanvasElement>();
+
 function drawFrame(ctx: C, clip: FrameClip, W: number, H: number, t: number) {
   const def = getFrame(clip.frame);
+  const m = ctx.getTransform();
+  const k = Math.hypot(m.a, m.b); // pixels do canvas por pixel do projeto
+  const key = `${def.id}:${W}x${H}@${k.toFixed(4)}`;
+  let cached = frameCache.get(key);
+  if (!cached) {
+    const c = document.createElement('canvas');
+    c.width = Math.max(1, Math.round(W * k));
+    c.height = Math.max(1, Math.round(H * k));
+    const cctx = c.getContext('2d')!;
+    cctx.scale(c.width / W, c.height / H);
+    drawFrameStatic(cctx, def, W, H);
+    // só guarda depois que logos e fontes carregaram (senão ficariam faltando)
+    if (brandImage('horizontal') && document.fonts.status === 'loaded') {
+      if (frameCache.size > 8) frameCache.clear();
+      frameCache.set(key, c);
+    }
+    cached = c;
+  }
+  ctx.drawImage(cached, 0, 0, W, H);
+  if (def.ticker) {
+    const th = W * 0.075;
+    ctx.save();
+    ctx.translate(0, H - th - H * 0.05);
+    drawTicker(ctx, W, th, clip.text, t);
+    ctx.restore();
+  }
+}
+
+/** Moldura da marca: fundo PN fora da janela, fios de acabamento, logo e @perfil. */
+function drawFrameStatic(ctx: C, def: ReturnType<typeof getFrame>, W: number, H: number) {
   const win = frameWindow(def, W, H);
   const full = win.w >= W - 0.5 && win.h >= H - 0.5;
   if (!full) {
@@ -185,13 +221,6 @@ function drawFrame(ctx: C, clip: FrameClip, W: number, H: number, t: number) {
     ctx.save();
     ctx.translate(0, def.handle * H - hh / 2);
     drawHandle(ctx, W, hh, 'center');
-    ctx.restore();
-  }
-  if (def.ticker) {
-    const th = W * 0.075;
-    ctx.save();
-    ctx.translate(0, H - th - H * 0.05);
-    drawTicker(ctx, W, th, clip.text, t);
     ctx.restore();
   }
 }

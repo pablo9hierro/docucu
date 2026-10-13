@@ -108,7 +108,31 @@ export interface FitResult {
  * Maior corpo (≤ maxSize) cujo texto quebrado cabe na caixa maxW × maxH.
  * Busca binária — determinística, então preview e exportação concordam.
  */
+/** Cache do ajuste de texto: o resultado só depende dos parâmetros (e é recalculado se mudarem). */
+const fitCache = new Map<string, FitResult>();
+const FIT_CACHE_MAX = 400;
+
 export function fitText(
+  ctx: Ctx,
+  text: string,
+  font: FontSpec,
+  o: { maxW: number; maxH: number; maxSize: number; minSize?: number; lineHeight: number; upper: boolean; maxLines?: number },
+): FitResult {
+  const key = [text, font.family, font.weight, font.style ?? '', font.tracking ?? 0, o.maxW.toFixed(2), o.maxH.toFixed(2), o.maxSize.toFixed(2), o.minSize ?? '', o.lineHeight, o.upper ? 1 : 0, o.maxLines ?? ''].join('|');
+  const hit = fitCache.get(key);
+  if (hit && document.fonts.status === 'loaded') {
+    applyFont(ctx, font, hit.size);
+    return hit;
+  }
+  const r = computeFit(ctx, text, font, o);
+  if (document.fonts.status === 'loaded') {
+    if (fitCache.size >= FIT_CACHE_MAX) fitCache.delete(fitCache.keys().next().value!);
+    fitCache.set(key, r);
+  }
+  return r;
+}
+
+function computeFit(
   ctx: Ctx,
   text: string,
   font: FontSpec,
