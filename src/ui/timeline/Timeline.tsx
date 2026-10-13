@@ -57,10 +57,18 @@ type Gesture =
       kind: 'move';
       id: string;
       x0: number;
+      /** scrollLeft no início — a timeline pode rolar sozinha durante o gesto */
+      sl0: number;
       bases: { id: string; start: number; trackId: string; duration: number }[];
       moved: boolean;
     }
-  | { kind: 'trim'; id: string; edge: 'l' | 'r'; x0: number; start: number; end: number };
+  | { kind: 'trim'; id: string; edge: 'l' | 'r'; x0: number; sl0: number; start: number; end: number };
+
+/** Faixa junto às bordas que faz a timeline andar sozinha durante arrastes (px). */
+const EDGE_ZONE = 64;
+/** Velocidade máxima da rolagem automática (px/s): nem rápida demais, nem lenta. */
+const EDGE_MAX_SPEED = 520;
+const EDGE_MIN_SPEED = 90;
 
 export function Timeline() {
   const project = useEditor((s) => s.project)!;
@@ -74,6 +82,8 @@ export function Timeline() {
   const [snapAt, setSnapAt] = useState<number | null>(null);
   const gesture = useRef<Gesture | null>(null);
   const pointers = useRef(new Map<number, { x: number; y: number }>());
+  const lastPointer = useRef<{ x: number; y: number } | null>(null);
+  const autoRaf = useRef<number | null>(null);
 
   const visual = project.tracks.filter((t) => t.kind === 'visual');
   const mainId = visual[0]?.id;
@@ -118,7 +128,11 @@ export function Timeline() {
         e.preventDefault();
         const t = timeAt(e.clientX);
         setZoomAnchored(getEditor().zoom * Math.exp(-e.deltaY * 0.004), t, e.clientX);
-      } else if (!e.shiftKey && Math.abs(e.deltaY) > Math.abs(e.deltaX) && el.scrollHeight <= el.clientHeight + 2) {
+      } else if (e.shiftKey || Math.abs(e.deltaX) > Math.abs(e.deltaY)) {
+        // rolagem horizontal é controlada aqui (a barra nativa horizontal fica oculta)
+        e.preventDefault();
+        el.scrollLeft += e.deltaX || e.deltaY;
+      } else if (el.scrollHeight <= el.clientHeight + 2) {
         e.preventDefault();
         el.scrollLeft += e.deltaY;
       }
@@ -174,6 +188,16 @@ export function Timeline() {
     const clipEl = target.closest('[data-clip]') as HTMLElement | null;
     const edge = target.dataset.edge as 'l' | 'r' | undefined;
     const onRuler = !!target.closest('.tl-ruler');
+    const onPlayhead = !!target.closest('.playhead');
+    lastPointer.current = { x: e.clientX, y: e.clientY };
+    const sl0 = scrollRef.current!.scrollLeft;
+
+    // agulha (cabeça ou corpo): arrastar navega; perto da borda a timeline anda sozinha
+    if (onPlayhead) {
+      gesture.current = { kind: 'scrub' };
+      startAutoScroll();
+      return;
+    }
 
     if (clipEl && !onRuler) {
       const id = clipEl.dataset.clip!;
@@ -183,7 +207,8 @@ export function Timeline() {
       if (edge) {
         s.select([id]);
         s.beginGesture();
-        gesture.current = { kind: 'trim', id, edge, x0: e.clientX, start: clip.start, end: clipEnd(clip) };
+        gesture.current = { kind: 'trim', id, edge, x0: e.clientX, sl0, start: clip.start, end: clipEnd(clip) };
+        startAutoScroll();
         return;
       }
       const wasSelected = s.selection.includes(id);
@@ -201,9 +226,11 @@ export function Timeline() {
         kind: 'move',
         id,
         x0: e.clientX,
+        sl0,
         bases: s.project!.clips.filter((c) => sel.includes(c.id)).map((c) => ({ id: c.id, start: c.start, trackId: c.trackId, duration: c.duration })),
         moved: false,
       };
+      startAutoScroll();
       return;
     }
 
@@ -211,25 +238,67 @@ export function Timeline() {
       gesture.current = { kind: 'scrub' };
       if (!onRuler && !e.shiftKey) s.select([]);
       seek(timeAt(e.clientX));
+      startAutoScroll();
       return;
     }
     const el = scrollRef.current!;
     gesture.current = { kind: 'pan', x: e.clientX, y: e.clientY, sl: el.scrollLeft, st: el.scrollTop, moved: false, t: timeAt(e.clientX) };
   };
 
+  /** Velocidade de rolagem automática conforme a proximidade da borda (negativa = esquerda). */
+  const edgeSpeed = (clientX: number) => {
+    const r = scrollRef.current!.getBoundingClientRect();
+    const left = r.left + headW;
+    const k = (d: number) => EDGE_MIN_SPEED + (EDGE_MAX_SPEED - EDGE_MIN_SPEED) * Math.min(1, d / EDGE_ZONE);
+    if (clientX < left + EDGE_ZONE) return -k(left + EDGE_ZONE - clientX);
+    if (clientX > r.right - EDGE_ZONE) return k(clientX - (r.right - EDGE_ZONE));
+    return 0;
+  };
+
+  /** Laço que rola a timeline enquanto o dedo/mouse estiver junto à borda num arraste. */
+  const startAutoScroll = () => {
+    if (autoRaf.current !== null) return;
+    let prev = performance.now();
+    const tick = (now: number) => {
+      const g = gesture.current;
+      const p = lastPointer.current;
+      if (!g || !p || !(g.kind === 'scrub' || g.kind === 'move' || g.kind === 'trim')) {
+        autoRaf.current = null;
+        return;
+      }
+      const dt = Math.min(0.05, (now - prev) / 1000);
+      prev = now;
+      const v = edgeSpeed(p.x);
+      const el = scrollRef.current!;
+      if (v !== 0) {
+        const before = el.scrollLeft;
+        el.scrollLeft = Math.max(0, before + v * dt);
+        if (el.scrollLeft !== before) handleMove(p.x, p.y);
+      }
+      autoRaf.current = requestAnimationFrame(tick);
+    };
+    autoRaf.current = requestAnimationFrame(tick);
+  };
+
   const onPointerMove = (e: RPointerEvent<HTMLDivElement>) => {
     if (!pointers.current.has(e.pointerId)) return;
     pointers.current.set(e.pointerId, { x: e.clientX, y: e.clientY });
+    lastPointer.current = { x: e.clientX, y: e.clientY };
+    handleMove(e.clientX, e.clientY);
+  };
+
+  const handleMove = (clientX: number, clientY: number) => {
     const g = gesture.current;
     if (!g) return;
     const s = getEditor();
+    const scrolled = 'sl0' in g ? scrollRef.current!.scrollLeft - g.sl0 : 0;
     switch (g.kind) {
       case 'scrub':
-        seek(timeAt(e.clientX));
+        seek(timeAt(clientX));
         return;
       case 'pan': {
-        const dx = e.clientX - g.x;
-        const dy = e.clientY - g.y;
+        const dx = clientX - g.x;
+        const dy = clientY - g.y;
         if (!g.moved && Math.hypot(dx, dy) < 6) return;
         g.moved = true;
         scrollRef.current!.scrollLeft = g.sl - dx;
@@ -244,8 +313,8 @@ export function Timeline() {
         return;
       }
       case 'move': {
-        const dxT = (e.clientX - g.x0) / s.zoom;
-        if (!g.moved && Math.abs(e.clientX - g.x0) < 3) return;
+        const dxT = (clientX - g.x0 + scrolled) / s.zoom;
+        if (!g.moved && Math.abs(clientX - g.x0) < 3 && scrolled === 0) return;
         g.moved = true;
         const prim = g.bases.find((b) => b.id === g.id)!;
         const ids = g.bases.map((b) => b.id);
@@ -261,7 +330,7 @@ export function Timeline() {
           setSnapAt(sEnd.value);
         } else setSnapAt(null);
         const delta = start - prim.start;
-        const hoverTrack = trackUnder(e.clientX, e.clientY);
+        const hoverTrack = trackUnder(clientX, clientY);
         s.updateGesture((base) => {
           let p = base;
           for (const b of g.bases) {
@@ -278,7 +347,7 @@ export function Timeline() {
         return;
       }
       case 'trim': {
-        const dxT = (e.clientX - g.x0) / s.zoom;
+        const dxT = (clientX - g.x0 + scrolled) / s.zoom;
         if (g.edge === 'l') {
           const sn = snapT(g.start + dxT, [g.id]);
           setSnapAt(sn.snapped ? sn.value : null);
@@ -435,6 +504,72 @@ export function Timeline() {
         </div>
         {project.clips.length === 0 && <div className="tl-empty">Importe um vídeo pelo painel Mídia ou arraste arquivos para cá</div>}
       </div>
+      <HScrollbar scrollRef={scrollRef} contentW={headW + laneW} viewLeft={view.left} viewW={view.width} headW={headW} />
+    </div>
+  );
+}
+
+/**
+ * Barra de rolagem horizontal larga, feita para o dedo: arraste o polegar
+ * ou toque na trilha para pular. Não interfere com os blocos da timeline.
+ */
+function HScrollbar({
+  scrollRef,
+  contentW,
+  viewLeft,
+  viewW,
+  headW,
+}: {
+  scrollRef: React.RefObject<HTMLDivElement | null>;
+  contentW: number;
+  viewLeft: number;
+  viewW: number;
+  headW: number;
+}) {
+  const trackRef = useRef<HTMLDivElement>(null);
+  const [trackW, setTrackW] = useState(0);
+  useLayoutEffect(() => {
+    const el = trackRef.current!;
+    const ro = new ResizeObserver(() => setTrackW(el.clientWidth));
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, []);
+  const maxScroll = Math.max(0, contentW - viewW);
+  const thumbW = maxScroll <= 0 ? trackW : Math.max(56, (trackW * viewW) / contentW);
+  const free = Math.max(1, trackW - thumbW);
+  const thumbX = maxScroll <= 0 ? 0 : (viewLeft / maxScroll) * free;
+
+  const scrollTo = (x: number) => {
+    const el = scrollRef.current;
+    if (el) el.scrollLeft = (Math.min(free, Math.max(0, x)) / free) * maxScroll;
+  };
+
+  const onDown = (e: RPointerEvent<HTMLDivElement>) => {
+    if (maxScroll <= 0) return;
+    e.preventDefault();
+    const r = trackRef.current!.getBoundingClientRect();
+    const onThumb = (e.target as HTMLElement).classList.contains('hsb-thumb');
+    // toque fora do polegar: centraliza o polegar ali e continua arrastando
+    const grab = onThumb ? e.clientX - r.left - thumbX : thumbW / 2;
+    if (!onThumb) scrollTo(e.clientX - r.left - grab);
+    const el = e.currentTarget;
+    el.setPointerCapture(e.pointerId);
+    const move = (ev: PointerEvent) => scrollTo(ev.clientX - r.left - grab);
+    const up = () => {
+      el.removeEventListener('pointermove', move);
+      el.removeEventListener('pointerup', up);
+      el.removeEventListener('pointercancel', up);
+    };
+    el.addEventListener('pointermove', move);
+    el.addEventListener('pointerup', up);
+    el.addEventListener('pointercancel', up);
+  };
+
+  return (
+    <div className="hsb" style={{ paddingLeft: headW }}>
+      <div className="hsb-track" ref={trackRef} onPointerDown={onDown} data-tip="Rolar a timeline" data-testid="tl-scrollbar">
+        <div className="hsb-thumb" style={{ width: thumbW, transform: `translateX(${thumbX}px)` }} />
+      </div>
     </div>
   );
 }
@@ -443,7 +578,7 @@ function Playhead({ headW }: { headW: number }) {
   const time = useEditor((s) => s.time);
   const zoom = useEditor((s) => s.zoom);
   return (
-    <div className="playhead" style={{ left: headW + time * zoom }}>
+    <div className="playhead" style={{ left: headW + time * zoom }} data-testid="playhead">
       <span className="playhead-cap" />
     </div>
   );

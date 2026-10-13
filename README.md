@@ -40,7 +40,9 @@ Para testar o layout de celular, abra o DevTools (F12) e use o modo de dispositi
 - **Desfoque**: desenhe um retângulo ou oval sobre o vídeo; mova e ajuste pelas alças. Também pode pixelizar. Para seguir algo em movimento, use keyframes.
 - **Inserção**: tudo entra exatamente na agulha, com no máximo 15 s e nunca além do fim do vídeo. Para estender, arraste a borda na timeline.
 - **Canvas**: arrastar move; os cantos escalam; as laterais mudam largura/altura (o texto se reorganiza ao vivo); a bolinha gira. No toque, pinça com dois dedos escala e gira; no trackpad, Ctrl+roda escala.
-- **Timeline**: arraste blocos (inclusive entre trilhas), puxe as bordas para cortar, ímã nas bordas e na agulha, pinça/Ctrl+roda para zoom. No toque, o primeiro toque seleciona e o arraste move o bloco selecionado; arrastar em área vazia rola.
+- **Timeline**: arraste blocos (inclusive entre trilhas), puxe as bordas para cortar, ímã nas bordas e na agulha, pinça/Ctrl+roda para zoom. Arraste a **agulha** (cabeça ou corpo) para navegar. Ao chegar perto da borda, a timeline anda sozinha, e o mesmo vale ao esticar ou mover blocos. Embaixo há uma **barra de rolagem larga**, feita para o dedo. No toque, o primeiro toque seleciona e o arraste move o bloco selecionado.
+- **Prévia em tela cheia**: botão no transporte (ou tecla `F`). Toque no vídeo para reproduzir ou pausar; `Esc` sai.
+- **Dicas**: passe o mouse sobre um botão (ou segure o dedo, no celular) para ver o que ele faz.
 - **Exportar**: MP4 H.264 + AAC renderizado pelo mesmo motor do preview (o que você vê é o que sai). Ao terminar, o vídeo é salvo **na memória do aparelho** (pasta Downloads do PC ou do Android). O app não guarda cópia do vídeo final.
 
 Atalhos: `Espaço` reproduzir · `S` dividir · `Delete` excluir (`Shift+Delete` fecha o espaço) · `Ctrl+Z / Ctrl+Shift+Z` · `Ctrl+D` duplicar · `Ctrl+C / Ctrl+V` · `,` `.` quadro a quadro · setas movem o item selecionado.
@@ -61,5 +63,8 @@ brand/          imagens da marca fornecidas pela redação
 **WYSIWYG**: `evaluateScene()` + `renderFrame()` desenham cada quadro. O preview chama os dois a cada frame e a exportação faz o mesmo, quadro a quadro, com cada vídeo posicionado no instante exato. Os JPEGs vão em lotes para o FFmpeg (`image2pipe → libx264`). O áudio é mixado a partir dos arquivos originais com o mesmo plano usado pelo player (`buildAudioPlan` → `buildFfmpegAudioGraph`: trim, velocidade, volume, fades, atraso).
 
 ### Futuro app Android
+
+Passo a passo completo (Capacitor + GitHub Actions + instalação): [docs/ANDROID.md](docs/ANDROID.md).
+
 
 Não há APK nesta etapa. A UI só depende das interfaces de `src/platform/api.ts`. Para o Android (por exemplo com Capacitor), basta implementar `ProjectStore`, `MediaService` e `ExportService` com um backend nativo (armazenamento local + codificação via MediaCodec ou FFmpeg compilado para Android). O núcleo (`src/core`) e o renderizador não dependem de Node.

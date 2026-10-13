@@ -3,6 +3,7 @@ import { ProjectsScreen } from './ProjectsScreen';
 import { Editor } from './Editor';
 import { Toast } from './Toast';
 import { DialogHost } from './dialogs';
+import { TooltipLayer } from './Tooltip';
 import { health } from '../platform/api';
 
 /** Roteamento mínimo por hash: #/ = projetos, #/p/<id> = editor. */
@@ -33,6 +34,7 @@ export function App() {
       {route.name === 'editor' ? <Editor key={route.id} projectId={route.id} /> : <ProjectsScreen />}
       <Toast />
       <DialogHost />
+      <TooltipLayer />
     </>
   );
 }

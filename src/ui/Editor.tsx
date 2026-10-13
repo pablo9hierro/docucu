@@ -36,12 +36,12 @@ import {
   IconUndo,
 } from './icons';
 
-const RAIL: { id: Panel; label: string; icon: typeof IconMedia }[] = [
-  { id: 'media', label: 'Mídia', icon: IconMedia },
-  { id: 'brand', label: 'Marca', icon: IconBrand },
-  { id: 'text', label: 'Manchetes', icon: IconText },
-  { id: 'blur', label: 'Desfoque', icon: IconBlur },
-  { id: 'audio', label: 'Áudio', icon: IconAudio },
+const RAIL: { id: Panel; label: string; tip: string; icon: typeof IconMedia }[] = [
+  { id: 'media', label: 'Mídia', tip: 'Mídia: importar vídeos e imagens', icon: IconMedia },
+  { id: 'brand', label: 'Marca', tip: 'Marca: logos para cobrir marcas d’água', icon: IconBrand },
+  { id: 'text', label: 'Manchetes', tip: 'Manchetes e molduras da Primeiras Notícias', icon: IconText },
+  { id: 'blur', label: 'Desfoque', tip: 'Desfoque: borrar ou pixelizar uma região', icon: IconBlur },
+  { id: 'audio', label: 'Áudio', tip: 'Áudio: músicas e trilhas', icon: IconAudio },
 ];
 
 function isTyping(e: KeyboardEvent) {
@@ -61,6 +61,29 @@ export function Editor({ projectId }: { projectId: string }) {
   const [dragOver, setDragOver] = useState(false);
   const [inspectorOpen, setInspectorOpen] = useState(false);
   const saveTimer = useRef<number | null>(null);
+  const previewFull = useEditor((s) => s.previewFull);
+  const stageAreaRef = useRef<HTMLElement>(null);
+
+  // prévia em tela cheia: usa a API de tela cheia quando existe (e cobre a janela como reserva)
+  useEffect(() => {
+    if (previewFull) {
+      getEditor().select([]);
+      getEditor().set('editingTextId', null);
+      stageAreaRef.current?.requestFullscreen?.().catch(() => undefined);
+    } else if (document.fullscreenElement) {
+      void document.exitFullscreen().catch(() => undefined);
+    }
+  }, [previewFull]);
+  useEffect(() => {
+    const on = () => {
+      if (!document.fullscreenElement && getEditor().previewFull) getEditor().set('previewFull', false);
+    };
+    document.addEventListener('fullscreenchange', on);
+    return () => {
+      document.removeEventListener('fullscreenchange', on);
+      getEditor().set('previewFull', false);
+    };
+  }, []);
 
   // carregamento
   useEffect(() => {
@@ -157,10 +180,13 @@ export function Editor({ projectId }: { projectId: string }) {
       } else if (k === 'delete' || k === 'backspace') {
         e.preventDefault();
         deleteSelection(e.shiftKey);
+      } else if (k === 'f' && !mod) {
+        s.set('previewFull', !s.previewFull);
       } else if (k === 's' && !mod) {
         splitAtPlayhead();
       } else if (k === 'escape') {
-        if (s.tool !== 'select') s.set('tool', 'select');
+        if (s.previewFull) s.set('previewFull', false);
+        else if (s.tool !== 'select') s.set('tool', 'select');
         else s.select([]);
       } else if (k === 'home') {
         seek(0);
@@ -242,14 +268,14 @@ export function Editor({ projectId }: { projectId: string }) {
         <button className="icon-btn" disabled={!canRedo} onClick={() => getEditor().redo()} title="Refazer (Ctrl+Shift+Z)" aria-label="Refazer">
           <IconRedo />
         </button>
-        <button className="btn primary" onClick={() => setExportOpen(true)} data-testid="open-export">
+        <button className="btn primary" onClick={() => setExportOpen(true)} data-testid="open-export" data-tip="Exportar o vídeo final em MP4 para o aparelho">
           <IconExport /> <span className="hide-sm">Exportar</span>
         </button>
       </header>
 
       <nav className="rail" aria-label="Ferramentas">
-        {RAIL.map(({ id, label, icon: Icon }) => (
-          <button key={id} className={`rail-btn ${panel === id ? 'active' : ''}`} onClick={() => togglePanel(id)} data-testid={`rail-${id}`}>
+        {RAIL.map(({ id, label, tip, icon: Icon }) => (
+          <button key={id} className={`rail-btn ${panel === id ? 'active' : ''}`} onClick={() => togglePanel(id)} data-testid={`rail-${id}`} data-tip={tip}>
             <Icon />
             <span>{label}</span>
           </button>
@@ -258,7 +284,7 @@ export function Editor({ projectId }: { projectId: string }) {
 
       {panel && <SidePanel panel={panel} onClose={() => getEditor().set('panel', null)} />}
 
-      <main className="stage-area">
+      <main className={`stage-area ${previewFull ? 'full' : ''}`} ref={stageAreaRef}>
         <Stage />
         <Transport onOpenInspector={() => setInspectorOpen(true)} />
       </main>

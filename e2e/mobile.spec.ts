@@ -22,6 +22,20 @@ test('layout mobile: palco, timeline, barra inferior e toque', async ({ page }) 
   const vp = page.viewportSize()!;
   expect(stage.width).toBeLessThanOrEqual(vp.width);
   expect(stage.height).toBeGreaterThan(200);
-  await page.waitForTimeout(600);
+  // barra de rolagem da timeline grande o bastante para o dedo
+  const sb = (await page.getByTestId('tl-scrollbar').boundingBox())!;
+  expect(sb.height).toBeGreaterThanOrEqual(28);
+  // segurar o dedo num botão mostra o nome dele, sem acionar
+  const btn = page.getByTestId('fullscreen');
+  const bb = (await btn.boundingBox())!;
+  const cdp = await page.context().newCDPSession(page);
+  const pt = { x: bb.x + bb.width / 2, y: bb.y + bb.height / 2 };
+  await cdp.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [pt] });
+  await page.waitForTimeout(700);
+  await expect(page.getByTestId('tooltip')).toHaveText(/tela cheia/i);
+  await cdp.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] });
+  await page.waitForTimeout(200);
+  await expect(page.locator('.stage-area.full')).toHaveCount(0);
+  await page.waitForTimeout(1600);
   await page.screenshot({ path: 'test-results/editor-mobile.png' });
 });

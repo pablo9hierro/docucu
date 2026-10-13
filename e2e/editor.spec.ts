@@ -126,6 +126,68 @@ test('fluxo completo: importar, manchete, manipular, desfocar, cortar e exportar
   expect(errors).toEqual([]);
 });
 
+test('navegação: agulha arrastável com rolagem automática, esticar na borda, barra larga, dicas e tela cheia', async ({ page }) => {
+  await newReelWithVideo(page);
+  const ed = (fn: string, arg?: unknown) =>
+    page.evaluate(
+      ([f, a]) => {
+        const s = (window as unknown as { __editor: { getState(): Record<string, (x: unknown) => void> } }).__editor.getState();
+        s[f as string]!(a);
+      },
+      [fn, arg] as const,
+    );
+  const scrollLeft = () => page.getByTestId('timeline').evaluate((el) => el.scrollLeft);
+  const tl = (await page.getByTestId('timeline').boundingBox())!;
+
+  // 1) arrastar a agulha até a borda direita: a timeline anda sozinha
+  await ed('setZoom', 400);
+  await ed('setTime', 0.2);
+  const ph = (await page.getByTestId('playhead').boundingBox())!;
+  await page.mouse.move(ph.x + ph.width / 2, tl.y + 80);
+  await page.mouse.down();
+  await page.mouse.move(tl.x + tl.width - 8, tl.y + 80, { steps: 6 });
+  await page.waitForTimeout(1200);
+  await page.mouse.up();
+  expect(await scrollLeft()).toBeGreaterThan(200);
+  const t = (await state(page)).time;
+  expect(t).toBeGreaterThan((tl.width - 132) / 400);
+
+  // 2) barra de rolagem larga: arrastar o polegar de volta ao início
+  const thumb = (await page.locator('.hsb-thumb').boundingBox())!;
+  await page.mouse.move(thumb.x + thumb.width / 2, thumb.y + thumb.height / 2);
+  await page.mouse.down();
+  await page.mouse.move(tl.x - 200, thumb.y + thumb.height / 2, { steps: 6 });
+  await page.mouse.up();
+  expect(await scrollLeft()).toBe(0);
+
+  // 3) esticar um bloco até a borda: a timeline anda e o bloco continua crescendo
+  await ed('setZoom', 100);
+  await ed('setTime', 0);
+  await page.getByTestId('rail-text').click();
+  await page.getByTestId('preset-pn-faixa').click();
+  const textClip = page.getByTestId('clip-text');
+  const cb = (await textClip.boundingBox())!;
+  await page.mouse.move(cb.x + cb.width - 3, cb.y + cb.height / 2);
+  await page.mouse.down();
+  await page.mouse.move(tl.x + tl.width - 6, cb.y + cb.height / 2, { steps: 6 });
+  await page.waitForTimeout(1500);
+  await page.mouse.up();
+  const text = (await state(page)).clips.find((c) => c.type === 'text')!;
+  expect(text.duration).toBeGreaterThan((tl.width - 132) / 100 + 1);
+
+  // 4) dica ao passar o mouse
+  await page.getByTestId('fullscreen').hover();
+  await expect(page.getByTestId('tooltip')).toHaveText(/tela cheia/i);
+
+  // 5) prévia em tela cheia e saída com Esc
+  await page.getByTestId('fullscreen').click();
+  await expect(page.locator('.stage-area.full')).toBeVisible();
+  await page.waitForTimeout(500);
+  await page.screenshot({ path: 'test-results/tela-cheia.png' });
+  await page.keyboard.press('Escape');
+  await expect(page.locator('.stage-area.full')).toHaveCount(0);
+});
+
 test('confirmação estilizada ao excluir mídia', async ({ page }) => {
   await newReelWithVideo(page);
   const item = page.getByTestId('media-item').first();

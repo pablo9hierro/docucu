@@ -861,6 +861,21 @@ input[type='range'] {
   min-height: 0;
   background: #0c0d0f;
 }
+/* prévia em tela cheia (com ou sem a API de fullscreen do navegador) */
+.stage-area.full {
+  position: fixed;
+  inset: 0;
+  z-index: 80;
+  background: #000;
+  padding-bottom: env(safe-area-inset-bottom);
+}
+.stage-area.full .stage {
+  box-shadow: none;
+}
+.stage-area.full .transport {
+  background: rgba(10, 12, 14, 0.9);
+  border-top-color: transparent;
+}
 .stage-wrap {
   flex: 1;
   min-height: 0;
@@ -1250,7 +1265,8 @@ input[type='range'] {
 .tl-scroll {
   position: relative;
   flex: 1;
-  overflow: auto;
+  overflow-x: hidden;
+  overflow-y: auto;
   touch-action: none;
   user-select: none;
   -webkit-user-select: none;
@@ -1462,16 +1478,61 @@ input[type='range'] {
   margin-left: -1px;
   background: #fff;
   z-index: 5;
-  pointer-events: none;
+  cursor: ew-resize;
+  touch-action: none;
+}
+/* área de toque bem maior que a linha visível */
+.playhead::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: -9px;
+  width: 20px;
 }
 .playhead-cap {
   position: absolute;
   top: 0;
-  left: -6px;
-  width: 14px;
-  height: 12px;
+  left: -7px;
+  width: 16px;
+  height: 14px;
   background: #fff;
   clip-path: polygon(0 0, 100% 0, 100% 55%, 50% 100%, 0 55%);
+}
+@media (pointer: coarse) {
+  .playhead::before { left: -18px; width: 38px; }
+  .playhead-cap { left: -11px; width: 24px; height: 20px; }
+}
+.hsb {
+  flex: none;
+  padding: 4px 8px 6px;
+  border-top: 1px solid var(--line);
+  background: var(--bg-2);
+}
+.hsb-track {
+  position: relative;
+  height: 14px;
+  border-radius: 7px;
+  background: var(--panel-2);
+  touch-action: none;
+  cursor: pointer;
+}
+.hsb-thumb {
+  position: absolute;
+  top: 2px;
+  bottom: 2px;
+  left: 0;
+  border-radius: 5px;
+  background: var(--line-2);
+  border: 1px solid #4a525e;
+}
+.hsb-track:hover .hsb-thumb {
+  background: #4a525e;
+}
+@media (pointer: coarse) {
+  .hsb { padding: 6px 10px 8px; }
+  .hsb-track { height: 30px; border-radius: 15px; }
+  .hsb-thumb { top: 3px; bottom: 3px; border-radius: 12px; background: #4a525e; }
 }
 .snap-line {
   position: absolute;
@@ -1549,6 +1610,29 @@ input[type='range'] {
 }
 .export-history .list-row {
   margin-bottom: 3px;
+}
+.tooltip {
+  position: fixed;
+  z-index: 90;
+  transform: translate(-50%, -100%);
+  max-width: min(260px, calc(100vw - 24px));
+  padding: 5px 9px;
+  border-radius: var(--r-sm);
+  background: #f1f3f5;
+  color: #14171b;
+  font-size: 12px;
+  font-weight: 500;
+  line-height: 1.35;
+  text-align: center;
+  pointer-events: none;
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.45);
+  animation: fade-in 0.1s ease-out;
+}
+.tooltip.below {
+  transform: translate(-50%, 0);
+}
+@media (pointer: coarse) {
+  .tooltip { font-size: 13.5px; padding: 7px 11px; }
 }
 .dialog-back {
   z-index: 70;
@@ -1635,7 +1719,7 @@ input[type='range'] {
 /* ------------------------------------------------------------ celular / tablet estreito */
 @media (max-width: 899px) {
   :root {
-    --tl-h: 210px;
+    --tl-h: 252px;
   }
   .editor {
     grid-template-columns: minmax(0, 1fr);

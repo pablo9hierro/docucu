@@ -24,6 +24,8 @@ interface EditorState {
   zoom: number;
   snapping: boolean;
   safeZones: boolean;
+  /** prévia em tela cheia (sem controles de edição sobre o vídeo) */
+  previewFull: boolean;
   tool: Tool;
   panel: Panel | null;
   editingTextId: string | null;
@@ -66,6 +68,7 @@ export const useEditor = create<EditorState>((set, get) => ({
   zoom: 80,
   snapping: true,
   safeZones: false,
+  previewFull: false,
   tool: 'select',
   panel: 'media',
   editingTextId: null,

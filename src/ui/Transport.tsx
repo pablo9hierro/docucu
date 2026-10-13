@@ -1,7 +1,7 @@
 import { useEditor, getEditor } from '../state/store';
 import { projectDuration } from '../core/timeline';
 import { seek, splitAtPlayhead, togglePlay } from './commands';
-import { IconEnd, IconPause, IconPlay, IconSafe, IconSettings, IconSplit, IconStart } from './icons';
+import { IconEnd, IconExitFullscreen, IconFullscreen, IconPause, IconPlay, IconSafe, IconSettings, IconSplit, IconStart } from './icons';
 
 export function formatTime(t: number, fps = 30) {
   const m = Math.floor(t / 60);
@@ -17,6 +17,7 @@ export function Transport({ onOpenInspector }: { onOpenInspector: () => void }) 
   const duration = useEditor((s) => (s.project ? projectDuration(s.project) : 0));
   const safeZones = useEditor((s) => s.safeZones);
   const hasSelection = useEditor((s) => s.selection.length > 0);
+  const full = useEditor((s) => s.previewFull);
 
   return (
     <div className="transport">
@@ -39,19 +40,32 @@ export function Transport({ onOpenInspector }: { onOpenInspector: () => void }) 
         </button>
       </div>
       <div className="transport-right">
-        <button className="icon-btn" onClick={splitAtPlayhead} title="Dividir na agulha (S)" aria-label="Dividir">
-          <IconSplit />
-        </button>
+        {!full && (
+          <>
+            <button className="icon-btn" onClick={splitAtPlayhead} title="Dividir na agulha (S)" aria-label="Dividir">
+              <IconSplit />
+            </button>
+            <button
+              className={`icon-btn ${safeZones ? 'on' : ''}`}
+              onClick={() => getEditor().set('safeZones', !safeZones)}
+              title="Mostrar área segura do Instagram"
+              aria-label="Área segura"
+            >
+              <IconSafe />
+            </button>
+            <button className="icon-btn show-sm" disabled={!hasSelection} onClick={onOpenInspector} aria-label="Ajustes do item" title="Ajustes do item selecionado">
+              <IconSettings />
+            </button>
+          </>
+        )}
         <button
-          className={`icon-btn ${safeZones ? 'on' : ''}`}
-          onClick={() => getEditor().set('safeZones', !safeZones)}
-          title="Mostrar área segura do Instagram"
-          aria-label="Área segura"
+          className="icon-btn"
+          onClick={() => getEditor().set('previewFull', !full)}
+          title={full ? 'Sair da tela cheia (Esc)' : 'Assistir em tela cheia'}
+          aria-label={full ? 'Sair da tela cheia' : 'Tela cheia'}
+          data-testid="fullscreen"
         >
-          <IconSafe />
-        </button>
-        <button className="icon-btn show-sm" disabled={!hasSelection} onClick={onOpenInspector} aria-label="Ajustes do item" title="Ajustes">
-          <IconSettings />
+          {full ? <IconExitFullscreen /> : <IconFullscreen />}
         </button>
       </div>
     </div>

@@ -22,7 +22,7 @@ import { effectiveTransform, setTransformAt } from '../../core/edit';
 import { renderFrame } from '../../render/renderer';
 import { preview } from '../../engine/preview';
 import { getEditor, useEditor } from '../../state/store';
-import { addBlur } from '../commands';
+import { addBlur, togglePlay } from '../commands';
 import { getPreset } from '../../core/presets';
 import { ensureBrandAssets, onBrandLoaded } from '../../render/brandAssets';
 import { TextEditOverlay } from './TextEditOverlay';
@@ -60,6 +60,7 @@ export function Stage() {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const [box, setBox] = useState({ w: 0, h: 0 });
   const needsRender = useRef(true);
+  const previewFull = useEditor((s) => s.previewFull);
 
   // --- dimensionamento: encaixa o quadro no espaço disponível
   useLayoutEffect(() => {
@@ -122,7 +123,13 @@ export function Stage() {
     <div className="stage-wrap" ref={wrapRef}>
       <div className="stage" style={{ width: box.w, height: box.h }} data-testid="stage">
         <canvas ref={canvasRef} className="stage-canvas" style={{ width: box.w, height: box.h }} />
-        {box.w > 0 && <Interaction project={project} scale={scale} />}
+        {box.w > 0 &&
+          (previewFull ? (
+            // na prévia em tela cheia não há controles de edição: tocar pausa/reproduz
+            <div className="stage-overlay" onClick={togglePlay} data-tip="Toque para reproduzir ou pausar" />
+          ) : (
+            <Interaction project={project} scale={scale} />
+          ))}
       </div>
     </div>
   );
