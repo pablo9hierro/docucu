@@ -13,7 +13,7 @@ import symbolUrl from '../assets/pn-symbol-watermark.jpg';
  */
 export type BrandLogo = 'horizontal' | 'normal' | 'watermark' | 'symbol';
 
-export const LOGO_RATIO: Record<BrandLogo, number> = { horizontal: 2143 / 709, normal: 1214 / 1058, watermark: 1564 / 508, symbol: 612 / 508 };
+export const LOGO_RATIO: Record<BrandLogo, number> = { horizontal: 1572 / 516, normal: 1214 / 1058, watermark: 1564 / 508, symbol: 612 / 508 };
 
 const urls: Record<BrandLogo, string> = { horizontal: horizontalUrl, normal: normalUrl, watermark: watermarkUrl, symbol: symbolUrl };
 const imgs: Partial<Record<BrandLogo, HTMLImageElement>> = {};

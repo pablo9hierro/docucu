@@ -42,7 +42,7 @@ export function Transport({ onOpenInspector }: { onOpenInspector: () => void }) 
       <div className="transport-right">
         {!full && (
           <>
-            <button className="icon-btn" onClick={splitAtPlayhead} title="Dividir na agulha (S)" aria-label="Dividir">
+            <button className="icon-btn transport-split" onClick={splitAtPlayhead} title="Dividir na agulha (S)" aria-label="Dividir">
               <IconSplit />
             </button>
             <button

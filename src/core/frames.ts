@@ -23,6 +23,8 @@ export interface FrameDef {
   window: Rect;
   /** logo horizontal: centro e largura em frações do quadro */
   logo: { cx: number; cy: number; w: number };
+  /** a logo preenche todo o cabeçalho (área acima da janela do vídeo) */
+  logoFill?: boolean;
   /** @perfil: centro vertical em fração, ou null */
   handle: number | null;
   ticker: boolean;
@@ -33,8 +35,9 @@ export const FRAMES: FrameDef[] = [
     id: 'topo',
     name: 'Vídeo no topo',
     description: 'Logo no cabeçalho, vídeo em cima e espaço para a manchete embaixo.',
-    window: { x: 0, y: 0.125, w: 1, h: 0.44 },
-    logo: { cx: 0.5, cy: 0.064, w: 0.46 },
+    window: { x: 0, y: 0.16, w: 1, h: 0.44 },
+    logo: { cx: 0.5, cy: 0.08, w: 0.46 },
+    logoFill: true,
     handle: 0.958,
     ticker: false,
   },
@@ -44,6 +47,7 @@ export const FRAMES: FrameDef[] = [
     description: 'Vídeo no meio, logo em cima e manchete embaixo.',
     window: { x: 0, y: 0.22, w: 1, h: 0.4 },
     logo: { cx: 0.5, cy: 0.11, w: 0.56 },
+    logoFill: true,
     handle: 0.958,
     ticker: false,
   },
@@ -53,6 +57,7 @@ export const FRAMES: FrameDef[] = [
     description: 'Vídeo com margens, como uma página de jornal.',
     window: { x: 0.05, y: 0.16, w: 0.9, h: 0.48 },
     logo: { cx: 0.5, cy: 0.08, w: 0.5 },
+    logoFill: true,
     handle: 0.958,
     ticker: false,
   },

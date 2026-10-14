@@ -4,6 +4,7 @@
  */
 import { useEffect, useRef, useState } from 'react';
 import { create } from 'zustand';
+import { useBackHandler } from '../platform/backButton';
 
 interface ConfirmReq {
   kind: 'confirm';
@@ -58,6 +59,9 @@ function Dialog({ req }: { req: Req }) {
     else req.resolve(ok && value.trim() ? value.trim() : null);
     pop();
   };
+
+  // botão voltar do celular = Cancelar
+  useBackHandler(true, () => close(false));
 
   useEffect(() => {
     if (req.kind === 'prompt') {

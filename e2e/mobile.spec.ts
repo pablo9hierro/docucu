@@ -39,3 +39,45 @@ test('layout mobile: palco, timeline, barra inferior e toque', async ({ page }) 
   await page.waitForTimeout(1600);
   await page.screenshot({ path: 'test-results/editor-mobile.png' });
 });
+
+/** Botões essenciais inteiros dentro da tela em vários tamanhos de celular. */
+for (const vp of [
+  { width: 320, height: 640 },
+  { width: 360, height: 740 },
+  { width: 393, height: 852 },
+  { width: 412, height: 915 },
+]) {
+  test(`responsivo ${vp.width}x${vp.height}: nenhum botão essencial fora da tela`, async ({ page }) => {
+    await page.setViewportSize(vp);
+    await page.goto('/');
+    await page.getByTestId('new-reel').click();
+    await expect(page.getByTestId('stage')).toBeVisible();
+    // um item selecionado para habilitar Ajustes
+    await page.getByTestId('rail-text').tap();
+    await page.getByTestId('preset-pn-faixa').tap();
+    await page.getByTestId('rail-text').tap();
+    const must = [
+      page.getByLabel('Projetos'),
+      page.getByTestId('open-export'),
+      page.getByTestId('play'),
+      page.getByLabel('Ajustes do item'),
+      page.getByTestId('fullscreen'),
+      page.getByTestId('rail-media'),
+      page.getByTestId('rail-audio'),
+      page.getByTestId('tl-split'),
+      page.getByTestId('tl-delete'),
+    ];
+    for (const el of must) {
+      await expect(el).toBeVisible();
+      const b = (await el.boundingBox())!;
+      expect(b.x).toBeGreaterThanOrEqual(0);
+      expect(b.y).toBeGreaterThanOrEqual(0);
+      expect(b.x + b.width).toBeLessThanOrEqual(vp.width + 0.5);
+      expect(b.y + b.height).toBeLessThanOrEqual(vp.height + 0.5);
+    }
+    // Ajustes abre o inspector com o texto da manchete
+    await page.getByLabel('Ajustes do item').tap();
+    await expect(page.getByTestId('insp-title')).toBeVisible();
+    await page.screenshot({ path: `test-results/responsivo-${vp.width}.png` });
+  });
+}

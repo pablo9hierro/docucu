@@ -2,7 +2,8 @@ import { useEffect, useState } from 'react';
 import { ProjectsScreen } from './ProjectsScreen';
 import { Editor } from './Editor';
 import { Toast } from './Toast';
-import { DialogHost } from './dialogs';
+import { DialogHost, confirmDialog } from './dialogs';
+import { exitApp, installBackButton } from '../platform/backButton';
 import { TooltipLayer } from './Tooltip';
 import { health } from '../platform/api';
 
@@ -21,6 +22,21 @@ function useRoute() {
 export function App() {
   const route = useRoute();
   const [serverIssue, setServerIssue] = useState<string | null>(null);
+
+  // botão voltar do Android: sem nada aberto, editor → lista de projetos; lista → perguntar se sai
+  useEffect(() => {
+    void installBackButton(() => {
+      if (/^#\/p\//.test(location.hash)) {
+        location.hash = '#/';
+        return;
+      }
+      void confirmDialog({ title: 'Sair do PN Studio?', message: 'Seus projetos ficam salvos no aparelho.', confirmLabel: 'Sair' }).then(
+        (ok) => {
+          if (ok) void exitApp();
+        },
+      );
+    });
+  }, []);
 
   useEffect(() => {
     health()

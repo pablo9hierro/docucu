@@ -213,9 +213,18 @@ function drawFrameStatic(ctx: C, def: ReturnType<typeof getFrame>, W: number, H:
     ctx.fillRect(win.x, win.y - t2 - t1, win.w, t1);
     ctx.fillRect(win.x, win.y + win.h + t2, win.w, t1);
   }
-  const lw = def.logo.w * W;
-  const lh = lw / LOGO_RATIO.horizontal;
-  drawLogo(ctx, def.logo.cx * W - lw / 2, def.logo.cy * H - lh / 2, lh);
+  if (def.logoFill && win.y > 0) {
+    // logo grande preenchendo todo o cabeçalho acima da janela do vídeo
+    const boxW = W * 0.94;
+    const boxH = win.y * 0.86;
+    const lh = Math.min(boxH, boxW / LOGO_RATIO.horizontal);
+    const lw = lh * LOGO_RATIO.horizontal;
+    drawLogo(ctx, (W - lw) / 2, (win.y - lh) / 2, lh);
+  } else {
+    const lw = def.logo.w * W;
+    const lh = lw / LOGO_RATIO.horizontal;
+    drawLogo(ctx, def.logo.cx * W - lw / 2, def.logo.cy * H - lh / 2, lh);
+  }
   if (def.handle !== null) {
     const hh = W * 0.075;
     ctx.save();

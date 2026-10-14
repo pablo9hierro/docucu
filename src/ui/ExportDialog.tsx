@@ -5,6 +5,7 @@ import { deviceStorage, exporter, type ExportProgress } from '../platform/api';
 import { stopPlayback } from './commands';
 import { formatTime } from './Transport';
 import { IconClose } from './icons';
+import { useBackHandler } from '../platform/backButton';
 
 const QUALITY = [
   { id: 'high', label: 'Alta', crf: 16 },
@@ -60,6 +61,11 @@ export function ExportDialog({ onClose }: { onClose: () => void }) {
   };
 
   const busy = !!abort.current && !result && !error;
+
+  // botão voltar: fecha o diálogo (durante a exportação, não interrompe sem querer)
+  useBackHandler(true, () => {
+    if (!busy) onClose();
+  });
   const pct = progress ? (progress.phase === 'encoding' ? 99 : progress.total ? Math.floor((progress.frame / progress.total) * 98) : 0) : 0;
   const eta = progress && progress.fps > 0 ? (progress.total - progress.frame) / progress.fps : null;
 

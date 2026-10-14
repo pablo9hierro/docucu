@@ -24,6 +24,7 @@ import {
   togglePlay,
 } from './commands';
 import { importFiles, loadAllMedia } from './importer';
+import { useBackHandler } from '../platform/backButton';
 import {
   IconAudio,
   IconBack,
@@ -63,6 +64,19 @@ export function Editor({ projectId }: { projectId: string }) {
   const saveTimer = useRef<number | null>(null);
   const previewFull = useEditor((s) => s.previewFull);
   const stageAreaRef = useRef<HTMLElement>(null);
+
+  // botão voltar do celular: fecha o que estiver aberto, um passo por vez;
+  // sem nada aberto, o App volta para a lista de projetos
+  useBackHandler(true, () => {
+    const s = getEditor();
+    if (s.previewFull) return void s.set('previewFull', false), true;
+    if (s.editingTextId) return void s.set('editingTextId', null), true;
+    if (inspectorOpen) return void setInspectorOpen(false), true;
+    if (s.panel && window.matchMedia('(max-width: 899px)').matches) return void s.set('panel', null), true;
+    if (s.tool !== 'select') return void s.set('tool', 'select'), true;
+    if (s.selection.length) return void s.select([]), true;
+    return false;
+  });
 
   // prévia em tela cheia: usa a API de tela cheia quando existe (e cobre a janela como reserva)
   useEffect(() => {

@@ -1037,8 +1037,9 @@ input[type='range'] {
 }
 
 .transport {
-  display: grid;
-  grid-template-columns: 1fr auto 1fr;
+  display: flex;
+  justify-content: space-between;
+  gap: 6px;
   align-items: center;
   height: 44px;
   padding: 0 10px;
@@ -1246,6 +1247,10 @@ input[type='range'] {
   display: flex;
   align-items: center;
   gap: 2px;
+  /* se faltar espaço, a barra rola em vez de esconder botões */
+  overflow-x: auto;
+  overflow-y: hidden;
+  scrollbar-width: none;
   height: 38px;
   padding: 0 8px;
   border-bottom: 1px solid var(--line);
@@ -1812,5 +1817,51 @@ input[type='range'] {
   .chip-format,
   .save-state {
     display: none;
+  }
+}
+
+
+/* ------------------------------------------------------------ telas estreitas */
+.tc {
+  flex: 0 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.transport-center,
+.transport-right {
+  flex: none;
+}
+.transport-right {
+  min-width: 0;
+}
+.tl-toolbar > * {
+  flex: none;
+}
+.tl-toolbar::-webkit-scrollbar {
+  display: none;
+}
+@media (max-width: 420px) {
+  /* some só o que é repetido: a duração total e o dividir (que já está na timeline) */
+  .tc-sep,
+  .tc-dur,
+  .transport-split {
+    display: none;
+  }
+  .transport {
+    padding: 0 6px;
+    gap: 2px;
+  }
+  .zoom-range {
+    width: 64px;
+  }
+}
+@media (max-width: 340px) {
+  .transport .icon-btn {
+    width: 30px;
+  }
+  .play-btn {
+    width: 34px;
+    height: 34px;
   }
 }

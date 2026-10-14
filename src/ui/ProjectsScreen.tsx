@@ -6,6 +6,7 @@ import { projects, type ProjectSummary } from '../platform/api';
 import { useEditor } from '../state/store';
 import { IconDots, IconPlus } from './icons';
 import { confirmDialog, promptDialog } from './dialogs';
+import { useBackHandler } from '../platform/backButton';
 
 const FORMAT_ORDER: FormatId[] = ['reel', 'feed45', 'feed11', 'wide'];
 
@@ -21,6 +22,8 @@ export function ProjectsScreen() {
   const [list, setList] = useState<ProjectSummary[] | null>(null);
   const [name, setName] = useState('');
   const [menu, setMenu] = useState<string | null>(null);
+  // botão voltar fecha o menu de opções aberto
+  useBackHandler(menu !== null, () => setMenu(null));
   const notify = useEditor((s) => s.notify);
 
   const refresh = () =>

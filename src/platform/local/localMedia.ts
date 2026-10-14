@@ -152,7 +152,7 @@ async function process(meta: StoredMeta, file: Blob) {
 
 /** Logos oficiais já embutidas no app + imagens de marca enviadas pelo usuário. */
 const BUNDLED_BRAND: MediaAsset[] = [
-  { id: 'brand:logo-horizontal', name: 'Logo horizontal', url: horizontalUrl, width: 2143, height: 709 },
+  { id: 'brand:logo-horizontal', name: 'Logo horizontal', url: horizontalUrl, width: 1572, height: 516 },
   { id: 'brand:logo-normal', name: 'Logo normal', url: normalUrl, width: 1214, height: 1058 },
 ].map((b) => ({
   ...b,
