@@ -6,6 +6,7 @@ import { stopPlayback } from './commands';
 import { formatTime } from './Transport';
 import { IconClose } from './icons';
 import { useBackHandler } from '../platform/backButton';
+import { keepAlive } from '../platform/keepAlive';
 
 const QUALITY = [
   { id: 'high', label: 'Alta', crf: 16 },
@@ -23,6 +24,9 @@ export function ExportDialog({ onClose }: { onClose: () => void }) {
   const [result, setResult] = useState<{ file: string; where: string; blob: Blob; url: string; seconds: number } | null>(null);
   const [error, setError] = useState<string | null>(null);
   const abort = useRef<AbortController | null>(null);
+  // cada exportação tem um número; ao cancelar, o resultado da anterior é ignorado
+  const run = useRef(0);
+  const [running, setRunning] = useState(false);
   const started = useRef(0);
 
   // libera a prévia da memória ao fechar
@@ -40,27 +44,51 @@ export function ExportDialog({ onClose }: { onClose: () => void }) {
     setResult(null);
     const ctrl = new AbortController();
     abort.current = ctrl;
+    const my = ++run.current;
+    setRunning(true);
+    setProgress({ phase: 'preparing', frame: 0, total: 0, fps: 0 });
     started.current = performance.now();
+    const alive = keepAlive();
+    const report = (p: ExportProgress) => {
+      if (run.current === my) setProgress(p);
+    };
     try {
       const { blob, fileName } = await exporter.exportVideo(
         project,
         getEditor().media,
         { width, height, fps, duration, crf: QUALITY.find((q) => q.id === quality)!.crf },
-        setProgress,
+        report,
         ctrl.signal,
       );
+      if (run.current !== my) return;
       // entrega à memória do dispositivo; o app não guarda cópia do vídeo final
       const where = await deviceStorage.saveVideo(blob, fileName);
+      if (run.current !== my) return;
       setResult({ file: fileName, where, blob, url: URL.createObjectURL(blob), seconds: (performance.now() - started.current) / 1000 });
     } catch (e) {
+      if (run.current !== my) return;
       if ((e as Error).name !== 'AbortError') setError((e as Error).message);
       setProgress(null);
     } finally {
-      abort.current = null;
+      alive.release();
+      if (run.current === my) {
+        abort.current = null;
+        setRunning(false);
+      }
     }
   };
 
-  const busy = !!abort.current && !result && !error;
+  // Cancelar: a tela volta na hora; a exportação em andamento para logo em seguida
+  const cancel = () => {
+    abort.current?.abort();
+    abort.current = null;
+    run.current++;
+    setProgress(null);
+    setRunning(false);
+  };
+  useEffect(() => () => abort.current?.abort(), []);
+
+  const busy = running && !result;
 
   // botão voltar: fecha o diálogo (durante a exportação, não interrompe sem querer)
   useBackHandler(true, () => {
@@ -142,7 +170,7 @@ export function ExportDialog({ onClose }: { onClose: () => void }) {
                     {pct}%{eta !== null && progress.phase === 'rendering' ? ` · ~${Math.ceil(eta)} s` : ''}
                   </span>
                 </div>
-                <button className="btn" onClick={() => abort.current?.abort()}>
+                <button className="btn" onClick={cancel} data-testid="cancel-export">
                   Cancelar
                 </button>
               </div>

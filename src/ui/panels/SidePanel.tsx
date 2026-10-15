@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
-import type { MediaAsset, Project, TextClip } from '../../core/model';
+import type { AudioClip, MediaAsset, Project, TextClip, VideoClip } from '../../core/model';
 import { HEADLINE_PRESETS, type PresetCategory } from '../../core/presets';
-import { FRAMES, applyFrame, frameWindow, getFrame } from '../../core/frames';
+import { FRAMES, insertFrame, frameWindow, getFrame } from '../../core/frames';
 import { createTextClip, createProject } from '../../core/factory';
 import { drawHeadline } from '../../render/headlines';
 import { ensureFonts } from '../../render/fonts';
@@ -9,10 +9,14 @@ import { ensureBrandAssets } from '../../render/brandAssets';
 import { renderFrame } from '../../render/renderer';
 import { IS_LOCAL, media as mediaApi } from '../../platform/api';
 import { getEditor, useEditor, type Panel } from '../../state/store';
-import { addMedia, addText, applyFrameCmd } from '../commands';
+import { addMedia, addOutro, addText, applyFrameCmd } from '../commands';
+import { BUILTIN, BUILTIN_URL, getFrameLogo, setFrameLogo, type FrameLogoKind } from '../frameLogos';
 import { ACCEPT_ATTR, importFiles, onUploads, refreshBrand, type UploadProgress } from '../importer';
 import { formatTime } from '../Transport';
 import { confirmDialog } from '../dialogs';
+
+/** arrastar para a timeline só com mouse; no toque, arrastar disparava inserção dupla */
+const FINE_POINTER = typeof matchMedia === 'function' && matchMedia('(pointer: fine)').matches;
 import { IconClose, IconTrash, IconUpload } from '../icons';
 
 const TITLES: Record<Panel, string> = {
@@ -106,7 +110,7 @@ function MediaPanel({ kinds }: { kinds: MediaAsset['kind'][] }) {
           <div
             key={m.id}
             className={`media-item ${m.status}`}
-            draggable={m.status === 'ready'}
+            draggable={m.status === 'ready' && FINE_POINTER}
             onDragStart={(e) => {
               e.dataTransfer.setData('application/x-pn-media', m.id);
               e.dataTransfer.effectAllowed = 'copy';
@@ -116,7 +120,7 @@ function MediaPanel({ kinds }: { kinds: MediaAsset['kind'][] }) {
             data-testid="media-item"
           >
             <div className="media-thumb">
-              {m.kind === 'image' && <img src={m.url} alt="" loading="lazy" />}
+              {m.kind === 'image' && <img src={m.url} alt="" loading="lazy" draggable={false} />}
               {m.kind === 'video' && m.thumbs && (
                 <span
                   className="thumb-sprite"
@@ -192,12 +196,12 @@ function BrandPanel() {
             key={m.id}
             className="media-item ready"
             onClick={() => addMedia(m)}
-            draggable
+            draggable={FINE_POINTER}
             onDragStart={(e) => e.dataTransfer.setData('application/x-pn-media', m.id)}
             title={m.name}
           >
             <div className="media-thumb checker">
-              <img src={m.url} alt="" />
+              <img src={m.url} alt="" draggable={false} />
             </div>
             <div className="media-name ellipsis">{m.name}</div>
           </div>
@@ -217,11 +221,13 @@ const CATS: { id: PresetCategory; label: string }[] = [
 function TextPanel() {
   const format = useEditor((s) => s.project?.format ?? 'reel');
   const clips = useEditor((s) => s.project?.clips);
-  const current = clips?.find((c) => c.type === 'frame');
+  const time = useEditor((s) => s.time);
+  // moldura sob a agulha (pode haver várias na timeline)
+  const current = clips?.find((c) => c.type === 'frame' && time >= c.start && time < c.start + c.duration);
   const currentFrame = current?.type === 'frame' ? current.frame : null;
   return (
     <>
-      <p className="hint">Escolha a moldura e a manchete — as duas se encaixam. Cada escolha vira um único item na timeline, inserido na agulha.</p>
+      <p className="hint">Escolha a moldura e a manchete — as duas se encaixam. Cada escolha vira um item na timeline, inserido na agulha (pode colocar várias molduras).</p>
       <section className="preset-section">
         <h4>Molduras</h4>
         <div className="frame-grid">
@@ -238,6 +244,17 @@ function TextPanel() {
             </button>
           ))}
         </div>
+        <FrameLogos />
+      </section>
+      <section className="preset-section">
+        <h4>Encerramento</h4>
+        <button className="template-card outro-card" onClick={() => void addOutro()} data-testid="add-outro">
+          <PresetThumb presetId="pn-encerramento" />
+          <span>
+            <strong>Fim do vídeo · @primeirasnoticias_</strong>
+            <span className="muted small">Tela final estilo TikTok com a logo, o perfil e o som de encerramento. Entra depois do último item.</span>
+          </span>
+        </button>
       </section>
       {CATS.map((cat) => (
         <section key={cat.id} className="preset-section">
@@ -300,7 +317,7 @@ function FrameThumb({ frameId, format }: { frameId: string; format: Project['for
       const c = ref.current;
       if (!alive || !c) return;
       let p = createProject('thumb', format);
-      p = { ...applyFrame({ ...p, background: '#56606c' }, frameId).project };
+      p = { ...insertFrame({ ...p, background: '#56606c' }, frameId, 0).project };
       const dpr = window.devicePixelRatio || 1;
       const cssW = format === 'wide' ? 150 : 84;
       c.width = Math.round(cssW * dpr);
@@ -350,7 +367,120 @@ function BlurPanel() {
           ))}
         </div>
       )}
+      <VoiceDisguise />
     </>
   );
 }
 
+type Voice = 'normal' | 'high' | 'low';
+const VOICES: { v: Voice; label: string }[] = [
+  { v: 'normal', label: 'Normal' },
+  { v: 'high', label: 'Aguda' },
+  { v: 'low', label: 'Grave' },
+];
+
+/** Disfarça a voz dos vídeos/áudios selecionados (fonte que não pode ser identificada). */
+function VoiceDisguise() {
+  const clips = useEditor((s) => s.project?.clips);
+  const selection = useEditor((s) => s.selection);
+  const targets = (clips ?? []).filter((c): c is VideoClip | AudioClip => (c.type === 'video' || c.type === 'audio') && selection.includes(c.id));
+  const current = targets.length ? (targets.every((c) => (c.voice ?? 'normal') === (targets[0]!.voice ?? 'normal')) ? (targets[0]!.voice ?? 'normal') : null) : null;
+  const setVoice = (v: Voice) => {
+    const ids = new Set(targets.map((c) => c.id));
+    getEditor().apply((p) => ({
+      ...p,
+      clips: p.clips.map((c) => (ids.has(c.id) && (c.type === 'video' || c.type === 'audio') ? { ...c, voice: v } : c)),
+    }));
+  };
+  return (
+    <div className="voice-disguise" data-testid="voice-disguise">
+      <h4>Disfarçar voz</h4>
+      <p className="hint">
+        {targets.length
+          ? 'Muda o tom da voz para a pessoa não ser reconhecida. Vale na prévia e no vídeo exportado.'
+          : 'Selecione na timeline o vídeo ou áudio com a voz que deseja disfarçar.'}
+      </p>
+      <div className="row-gap">
+        {VOICES.map(({ v, label }) => (
+          <button
+            key={v}
+            className={`btn ${current === v ? 'primary' : ''}`}
+            disabled={!targets.length}
+            onClick={() => setVoice(v)}
+            data-testid={`voice-${v}`}
+          >
+            {label}
+          </button>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+
+/**
+ * Logos da moldura: enviar imagens e marcar qual é a padrão (horizontal para o
+ * cabeçalho, redonda para a marca grande que passa no fundo). Troca na hora.
+ */
+function FrameLogos() {
+  const all = useEditor((s) => s.media);
+  const brand = Object.values(all).filter((m) => m.brand && m.kind === 'image' && m.status === 'ready');
+  const [sel, setSel] = useState<Record<FrameLogoKind, string>>(() => ({ horizontal: getFrameLogo('horizontal'), round: getFrameLogo('round') }));
+  const input = useRef<HTMLInputElement>(null);
+  const choose = (kind: FrameLogoKind, id: string) => {
+    setFrameLogo(kind, id, getEditor().media);
+    setSel((s) => ({ ...s, [kind]: id }));
+  };
+  const rows: { kind: FrameLogoKind; label: string }[] = [
+    { kind: 'horizontal', label: 'Logo horizontal (cabeçalho)' },
+    { kind: 'round', label: 'Logo redonda (marca no fundo)' },
+  ];
+  return (
+    <div className="frame-logos" data-testid="frame-logos">
+      <div className="row-between">
+        <h5>Logos da moldura</h5>
+        <button className="btn sm" onClick={() => input.current?.click()} data-testid="frame-logo-upload">
+          <IconUpload /> Enviar
+        </button>
+      </div>
+      <input
+        ref={input}
+        type="file"
+        accept="image/*"
+        multiple
+        hidden
+        onChange={async (e) => {
+          const files = [...(e.target.files ?? [])];
+          e.target.value = '';
+          for (const f of files) {
+            try {
+              await mediaApi.uploadBrand(f);
+            } catch (err) {
+              getEditor().notify((err as Error).message, 'error');
+            }
+          }
+          await refreshBrand();
+        }}
+      />
+      {rows.map(({ kind, label }) => (
+        <div key={kind} className="logo-row">
+          <span className="muted small">{label}</span>
+          <div className="logo-opts">
+            {[{ id: BUILTIN, url: BUILTIN_URL[kind], name: 'Padrão PN' }, ...brand.map((b) => ({ id: b.id, url: b.url, name: b.name }))].map((o) => (
+              <button
+                key={o.id}
+                className={`logo-opt ${sel[kind] === o.id ? 'on' : ''}`}
+                onClick={() => choose(kind, o.id)}
+                title={o.name}
+                data-testid={`frame-logo-${kind}-${o.id === BUILTIN ? 'builtin' : 'custom'}`}
+              >
+                <img src={o.url} alt="" />
+                {sel[kind] === o.id && <span className="logo-flag">Padrão</span>}
+              </button>
+            ))}
+          </div>
+        </div>
+      ))}
+    </div>
+  );
+}

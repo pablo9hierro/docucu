@@ -5,7 +5,7 @@
 import type { Animation, TextFields, TextStyle } from './model';
 import { PN } from './brand';
 
-export type PresetCategory = 'manchete' | 'tarja' | 'selo' | 'texto';
+export type PresetCategory = 'manchete' | 'tarja' | 'selo' | 'texto' | 'encerramento';
 
 export interface HeadlinePreset {
   id: string;
@@ -227,6 +227,20 @@ const RAW_PRESETS: HeadlinePreset[] = [
     animIn: { type: 'fade', duration: 0.4 },
     animOut: { type: 'fade', duration: 0.4 },
     defaultDuration: null,
+  },
+  {
+    id: 'pn-encerramento',
+    name: 'Encerramento @perfil',
+    category: 'encerramento',
+    description: 'Tela final estilo TikTok: logo com efeito, @primeirasnoticias_ e som de encerramento.',
+    size: { w: 1, h: 1 },
+    pos: { x: 0.5, y: 0.5 },
+    fields: { kicker: 'Siga para mais notícias', title: PN.handle, subtitle: '' },
+    uses: ['kicker'],
+    style: { ...base, uppercase: false },
+    animIn: { type: 'preset', duration: 1 },
+    animOut: { type: 'fade', duration: 1 },
+    defaultDuration: 3.5,
   },
   {
     id: 'plain',

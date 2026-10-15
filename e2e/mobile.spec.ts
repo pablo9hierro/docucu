@@ -81,3 +81,48 @@ for (const vp of [
     await page.screenshot({ path: `test-results/responsivo-${vp.width}.png` });
   });
 }
+
+/** Recursos novos cabem num celular pequeno (320 px, como Xiaomi com "tela ampliada"). */
+test('320px: velocidade, corte, voz e exportação sem estourar a tela', async ({ page }) => {
+  test.setTimeout(120_000);
+  const vp = { width: 320, height: 640 };
+  await page.setViewportSize(vp);
+  await page.goto('/?local=1');
+  await page.getByTestId('new-reel').click();
+  await page.getByTestId('rail-media').tap();
+  const { file, name } = uniqueTestVideo();
+  await page.getByTestId('file-input').setInputFiles(file);
+  const item = page.getByTestId('media-item').filter({ hasText: name });
+  await expect(item).toHaveClass(/ready/, { timeout: 60_000 });
+  await item.tap();
+  await page.getByTestId('rail-media').tap();
+  await expect(page.getByTestId('clip-video')).toHaveCount(1);
+  const inside = async (sel: ReturnType<typeof page.getByTestId>) => {
+    await sel.scrollIntoViewIfNeeded();
+    const b = (await sel.boundingBox())!;
+    expect(b.x).toBeGreaterThanOrEqual(0);
+    expect(b.x + b.width).toBeLessThanOrEqual(vp.width + 0.5);
+  };
+  const noHScroll = async () => expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(vp.width);
+
+  await page.getByLabel('Ajustes do item').tap();
+  for (const v of ['0.25', '1', '4']) await inside(page.getByTestId(`speed-${v}`));
+  await inside(page.getByTestId('crop-toggle'));
+  await noHScroll();
+  await page.screenshot({ path: 'test-results/mobile-320-ajustes.png' });
+  await page.getByLabel('Fechar ajustes').tap();
+
+  await page.getByTestId('rail-blur').tap();
+  for (const v of ['normal', 'high', 'low']) await inside(page.getByTestId(`voice-${v}`));
+  await noHScroll();
+  await page.screenshot({ path: 'test-results/mobile-320-voz.png' });
+  await page.getByTestId('rail-blur').tap();
+
+  await page.getByTestId('open-export').tap();
+  await inside(page.getByTestId('start-export'));
+  await page.getByTestId('start-export').tap();
+  await inside(page.getByTestId('cancel-export'));
+  await page.getByTestId('cancel-export').tap();
+  await expect(page.getByTestId('start-export')).toBeVisible({ timeout: 1500 });
+  await noHScroll();
+});

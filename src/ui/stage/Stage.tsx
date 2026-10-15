@@ -12,13 +12,19 @@ import {
   hitTest,
   pointerAngle,
   rectFromPoints,
+  dragCrop,
+  fullMediaRect,
+  rotate,
+  NO_CROP,
+  type CropEdge,
+  type CropValue,
   resizeTransform,
   rotationFromPointer,
   snapPosition,
   type Guide,
   type Handle,
 } from '../../core/geometry';
-import { effectiveTransform, setTransformAt } from '../../core/edit';
+import { effectiveTransform, patchClip, setTransformAt } from '../../core/edit';
 import { renderFrame } from '../../render/renderer';
 import { preview } from '../../engine/preview';
 import { getEditor, useEditor } from '../../state/store';
@@ -49,6 +55,7 @@ type Gesture =
   | { kind: 'move'; start: { x: number; y: number }; bases: Map<string, Transform>; primary: string; moved: boolean }
   | { kind: 'resize'; id: string; handle: Handle; start: { x: number; y: number }; base: Transform }
   | { kind: 'rotate'; id: string; base: Transform; startAngle: number }
+  | { kind: 'crop'; id: string; edge: CropEdge; start: { x: number; y: number }; base: Transform; crop: CropValue }
   | { kind: 'pinch'; id: string; base: Transform; d0: number; a0: number; m0: { x: number; y: number } }
   | { kind: 'draw'; start: { x: number; y: number }; cur: { x: number; y: number } };
 
@@ -142,6 +149,10 @@ function Interaction({ project, scale }: { project: Project; scale: number }) {
   const tool = useEditor((s) => s.tool);
   const safeZones = useEditor((s) => s.safeZones);
   const editingTextId = useEditor((s) => s.editingTextId);
+  const cropId = useEditor((s) => s.cropId);
+  useEffect(() => {
+    if (cropId && !selection.includes(cropId)) getEditor().set('cropId', null);
+  }, [cropId, selection]);
   const [guides, setGuides] = useState<Guide[]>([]);
   const [drawRect, setDrawRect] = useState<{ x: number; y: number; width: number; height: number } | null>(null);
   const gesture = useRef<Gesture | null>(null);
@@ -311,6 +322,12 @@ function Interaction({ project, scale }: { project: Project; scale: number }) {
       const rot = rotationFromPointer(g.base, pt.x, pt.y, g.startAngle, g.base.rotation, snapping);
       s.updateGesture((base) => setTransformAt(base, g.id, s.time, { ...g.base, rotation: rot }));
     }
+    if (g.kind === 'crop') {
+      // deslocamento do ponteiro no eixo local do item
+      const d = rotate(pt.x - g.start.x, pt.y - g.start.y, -g.base.rotation);
+      const r = dragCrop(g.base, g.crop, g.edge, g.edge === 'l' || g.edge === 'r' ? d.x : d.y);
+      s.updateGesture((base) => patchClip(setTransformAt(base, g.id, s.time, r.transform), g.id, { crop: r.crop } as Partial<VisualClip>));
+    }
   };
 
   const finish = (e: RPointerEvent<HTMLDivElement>, cancelled = false) => {
@@ -340,7 +357,7 @@ function Interaction({ project, scale }: { project: Project; scale: number }) {
     setGuides([]);
   };
 
-  const startHandle = (e: RPointerEvent, id: string, handle: Handle | 'rotate') => {
+  const startHandle = (e: RPointerEvent, id: string, handle: Handle | 'rotate' | CropEdge) => {
     e.stopPropagation();
     if (e.pointerType === 'mouse' && e.button !== 0) return;
     const s = getEditor();
@@ -351,6 +368,11 @@ function Interaction({ project, scale }: { project: Project; scale: number }) {
     rootRef.current!.setPointerCapture(e.pointerId);
     s.beginGesture();
     const base = effectiveTransform(clip, s.time);
+    if (handle === 'l' || handle === 't' || handle === 'r' || handle === 'b') {
+      const crop = (clip.type === 'video' || clip.type === 'image') && clip.crop ? clip.crop : NO_CROP;
+      gesture.current = { kind: 'crop', id, edge: handle, start: pt, base, crop };
+      return;
+    }
     gesture.current =
       handle === 'rotate'
         ? { kind: 'rotate', id, base, startAngle: pointerAngle(base, pt.x, pt.y) }
@@ -403,6 +425,7 @@ function Interaction({ project, scale }: { project: Project; scale: number }) {
           scale={scale}
           type={it.clip.type}
           primary={selectedItems.length === 1}
+          crop={cropId === it.clip.id && (it.clip.type === 'video' || it.clip.type === 'image') ? (it.clip.crop ?? NO_CROP) : null}
           onHandle={(e, h) => startHandle(e, it.clip.id, h)}
         />
       ))}
@@ -435,16 +458,36 @@ function Gizmo({
   scale,
   type,
   primary,
+  crop,
   onHandle,
 }: {
   tr: Transform;
   scale: number;
   type: VisualClip['type'];
   primary: boolean;
-  onHandle: (e: RPointerEvent, h: Handle | 'rotate') => void;
+  /** modo de corte: mostra as alças de borda e o contorno da mídia inteira */
+  crop: CropValue | null;
+  onHandle: (e: RPointerEvent, h: Handle | 'rotate' | CropEdge) => void;
 }) {
   const w = tr.width * scale;
   const h = tr.height * scale;
+  if (crop && primary) {
+    const full = fullMediaRect(tr, crop);
+    return (
+      <div
+        className="gizmo gizmo-crop"
+        style={{ left: tr.x * scale - w / 2, top: tr.y * scale - h / 2, width: w, height: h, transform: `rotate(${tr.rotation}deg)` }}
+      >
+        <span
+          className="crop-full"
+          style={{ left: (full.x + tr.width / 2) * scale, top: (full.y + tr.height / 2) * scale, width: full.w * scale, height: full.h * scale }}
+        />
+        {(['t', 'r', 'b', 'l'] as const).map((edge) => (
+          <span key={edge} className={`crop-h crop-${edge}`} onPointerDown={(e) => onHandle(e, edge)} data-handle={`crop-${edge}`} />
+        ))}
+      </div>
+    );
+  }
   // mídia redimensiona só pelos cantos (proporcional); gráficos por todas as alças
   const handles = MEDIA_TYPES.has(type) ? HANDLES.filter((x) => x.length === 2) : HANDLES;
   return (

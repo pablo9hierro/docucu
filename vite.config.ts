@@ -5,6 +5,8 @@ const API_PORT = Number(process.env.PN_API_PORT ?? 5174);
 
 export default defineConfig({
   plugins: [react()],
+  // som do encerramento embutido no app
+  assetsInclude: ['**/*.m4a'],
   server: {
     port: 5173,
     strictPort: true,

@@ -25,6 +25,7 @@ import {
 } from './commands';
 import { importFiles, loadAllMedia } from './importer';
 import { useBackHandler } from '../platform/backButton';
+import { applyFrameLogos } from './frameLogos';
 import {
   IconAudio,
   IconBack,
@@ -106,7 +107,12 @@ export function Editor({ projectId }: { projectId: string }) {
     s.close();
     if (window.matchMedia('(max-width: 899px)').matches) s.set('panel', null);
     Promise.all([projects.get(projectId), loadAllMedia(), ensureFonts()])
-      .then(([p]) => alive && getEditor().load(p))
+      .then(([p]) => {
+        if (!alive) return;
+        getEditor().load(p);
+        // logos padrão das molduras escolhidas pelo usuário
+        applyFrameLogos(getEditor().media);
+      })
       .catch((e: Error) => alive && setError(e.message));
     return () => {
       alive = false;
@@ -251,7 +257,7 @@ export function Editor({ projectId }: { projectId: string }) {
     <div
       className={`editor ${panel ? 'has-panel' : ''}`}
       onDragOver={(e) => {
-        if (e.dataTransfer.types.includes('Files')) {
+        if (e.dataTransfer.types.includes('Files') && !e.dataTransfer.types.includes('application/x-pn-media')) {
           e.preventDefault();
           setDragOver(true);
         }
@@ -260,7 +266,8 @@ export function Editor({ projectId }: { projectId: string }) {
         if (e.currentTarget === e.target) setDragOver(false);
       }}
       onDrop={(e) => {
-        if (!e.dataTransfer.files.length) return;
+        // arrastar da biblioteca não é importar arquivo novo
+        if (!e.dataTransfer.files.length || e.dataTransfer.types.includes('application/x-pn-media')) return;
         e.preventDefault();
         setDragOver(false);
         void importFiles(e.dataTransfer.files, true);

@@ -21,7 +21,7 @@ import {
 import { getPreset } from '../../core/presets';
 import { getEditor, useEditor } from '../../state/store';
 import { createAudioClip, createImageClip, createVideoClip } from '../../core/factory';
-import { deleteSelection, detachAudio, duplicateSelection, seek, splitAtPlayhead } from '../commands';
+import { deleteSelection, detachAudio, duplicateSelection, seek, splitAtPlayhead, recentlyAdded } from '../commands';
 import { formatTime } from '../Transport';
 import { getWaveform } from './waveforms';
 import {
@@ -386,6 +386,9 @@ export function Timeline() {
     const id = e.dataTransfer.getData('application/x-pn-media');
     if (!id) return;
     e.preventDefault();
+    // o Chrome anexa a imagem arrastada como "arquivo": sem isto o editor a importava de novo (item duplicado)
+    e.stopPropagation();
+    if (recentlyAdded(id)) return;
     const s = getEditor();
     const m = s.media[id];
     if (!m || !s.project || m.status !== 'ready') return;

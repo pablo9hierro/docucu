@@ -6,6 +6,7 @@ import type { AudioClip, MediaAsset, Project, VideoClip } from '../core/model';
 import { buildAudioPlan, gainAt, type AudioSegment } from '../core/audio';
 import { clipEnd, projectDuration } from '../core/timeline';
 import type { MediaSources } from '../render/renderer';
+import { createPitchShifter, type PitchShifter } from './pitchShifter';
 
 type MediaEl = HTMLVideoElement | HTMLAudioElement;
 
@@ -13,6 +14,7 @@ class PreviewEngine {
   private els = new Map<string, { el: MediaEl; url: string; pending: number | null }>();
   private images = new Map<string, HTMLImageElement>();
   private gains = new WeakMap<MediaEl, GainNode>();
+  private audioRoutes = new WeakMap<MediaEl, { src: MediaElementAudioSourceNode; pitch: number; shifter: PitchShifter | null }>();
   private audioCtx: AudioContext | null = null;
   private listeners = new Set<() => void>();
   private media: Record<string, MediaAsset> = {};
@@ -82,9 +84,28 @@ class PreviewEngine {
       const g = this.audioCtx.createGain();
       src.connect(g).connect(this.audioCtx.destination);
       this.gains.set(el, g);
+      this.audioRoutes.set(el, { src, pitch: 1, shifter: null });
     } catch {
       /* elemento já roteado */
     }
+  }
+
+  /** Disfarce de voz no preview: insere/remove o trocador de tom entre a mídia e o volume. */
+  private setPitch(el: MediaEl, pitch: number) {
+    const r = this.audioRoutes.get(el);
+    const g = this.gains.get(el);
+    if (!r || !g || !this.audioCtx || Math.abs(r.pitch - pitch) < 1e-3) return;
+    r.src.disconnect();
+    r.shifter?.dispose();
+    r.shifter = null;
+    if (Math.abs(pitch - 1) > 1e-3) {
+      r.shifter = createPitchShifter(this.audioCtx, pitch);
+      r.src.connect(r.shifter.input);
+      r.shifter.output.connect(g);
+    } else {
+      r.src.connect(g);
+    }
+    r.pitch = pitch;
   }
 
   private setGain(el: MediaEl, v: number) {
@@ -163,6 +184,7 @@ class PreviewEngine {
       if (playing && active) {
         if (el.playbackRate !== c.speed) el.playbackRate = c.speed;
         this.setGain(el, seg ? gainAt(seg, t) : 0);
+        this.setPitch(el, seg ? seg.pitch : 1);
         if (el.paused) {
           el.currentTime = Math.max(0, mediaT);
           void el.play().catch(() => undefined);

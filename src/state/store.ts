@@ -26,6 +26,8 @@ interface EditorState {
   safeZones: boolean;
   /** prévia em tela cheia (sem controles de edição sobre o vídeo) */
   previewFull: boolean;
+  /** clipe em modo de corte (alças de corte no palco) */
+  cropId: string | null;
   tool: Tool;
   panel: Panel | null;
   editingTextId: string | null;
@@ -69,6 +71,7 @@ export const useEditor = create<EditorState>((set, get) => ({
   snapping: true,
   safeZones: false,
   previewFull: false,
+  cropId: null,
   tool: 'select',
   panel: 'media',
   editingTextId: null,

@@ -91,7 +91,18 @@ const AudioProps = {
   muted: z.boolean(),
   fadeIn: num.min(0),
   fadeOut: num.min(0),
+  /** disfarce de voz: aguda/grave (troca o tom sem mudar a velocidade) */
+  voice: z.enum(['normal', 'high', 'low']).optional(),
 };
+
+/** Corte das bordas da mídia, em frações (0 = sem corte) */
+export const CropSchema = z.object({
+  l: num.min(0).max(0.95),
+  t: num.min(0).max(0.95),
+  r: num.min(0).max(0.95),
+  b: num.min(0).max(0.95),
+});
+export type Crop = z.infer<typeof CropSchema>;
 
 export const VideoClipSchema = z.object({
   type: z.literal('video'),
@@ -101,6 +112,7 @@ export const VideoClipSchema = z.object({
   hasAudio: z.boolean(),
   adjust: AdjustSchema,
   flipH: z.boolean(),
+  crop: CropSchema.optional(),
   /** preenche o quadro por trás do vídeo com o próprio vídeo desfocado */
   backdrop: z.enum(['none', 'blur', 'color']),
   backdropColor: z.string(),
@@ -112,6 +124,7 @@ export const ImageClipSchema = z.object({
   mediaId: z.string(),
   adjust: AdjustSchema,
   flipH: z.boolean(),
+  crop: CropSchema.optional(),
 });
 
 export const AudioClipSchema = z.object({

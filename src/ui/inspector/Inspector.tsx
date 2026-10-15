@@ -3,7 +3,8 @@
  * acontece no canvas e na timeline. Aqui ficam ajustes finos e propriedades.
  */
 import { useState, type ReactNode } from 'react';
-import type { BlurClip, Clip, FrameClip, Project, ShapeClip, SponsorsClip, TextClip, VideoClip, VisualClip } from '../../core/model';
+import type { BlurClip, Clip, FrameClip, ImageClip, Project, ShapeClip, SponsorsClip, TextClip, VideoClip, VisualClip } from '../../core/model';
+import { removeCrop } from '../../core/geometry';
 import { FORMATS, isVisual } from '../../core/model';
 import { getPreset } from '../../core/presets';
 import { getFrame } from '../../core/frames';
@@ -35,10 +36,11 @@ export function Inspector({ onClose }: { onClose: () => void }) {
       {clip.type === 'text' && <TextSection clip={clip} />}
       {clip.type === 'frame' && <FrameSection clip={clip} />}
       {clip.type === 'video' && <VideoSection clip={clip} />}
-      {clip.type === 'image' && <ImageSection />}
+      {clip.type === 'image' && <ImageSection clip={clip} />}
       {clip.type === 'blur' && <BlurSection clip={clip} />}
       {clip.type === 'sponsors' && <SponsorsSection clip={clip} />}
       {clip.type === 'shape' && <ShapeSection clip={clip} />}
+      {(clip.type === 'video' || clip.type === 'audio') && <SpeedSection clip={clip} />}
       {(clip.type === 'video' || clip.type === 'audio') && <AudioSection clip={clip} />}
       {isVisual(clip) && clip.type !== 'frame' && <TransformSection clip={clip} time={time} />}
       <TimingSection clip={clip} />
@@ -263,6 +265,7 @@ function VideoSection({ clip }: { clip: VideoClip }) {
             Espelhar
           </button>
         </div>
+        <CropControls clip={clip} />
       </Section>
       <Section title="Ajustes de imagem">
         <Slider label="Brilho" value={clip.adjust.brightness} min={0.3} max={2} step={0.01} onChange={(v) => adj('brightness', v)} />
@@ -273,7 +276,7 @@ function VideoSection({ clip }: { clip: VideoClip }) {
   );
 }
 
-function ImageSection() {
+function ImageSection({ clip }: { clip: ImageClip }) {
   return (
     <Section title="Enquadramento">
       <div className="row-gap">
@@ -284,7 +287,42 @@ function ImageSection() {
           Preencher
         </button>
       </div>
+      <CropControls clip={clip} />
     </Section>
+  );
+}
+
+/** Cortar as bordas arrastando as alças no vídeo (como o recortar do Windows). */
+function CropControls({ clip }: { clip: VideoClip | ImageClip }) {
+  const cropId = useEditor((s) => s.cropId);
+  const on = cropId === clip.id;
+  const c = clip.crop;
+  const hasCrop = !!c && (c.l > 0 || c.t > 0 || c.r > 0 || c.b > 0);
+  return (
+    <div className="field">
+      <span>Cortar bordas</span>
+      <div className="row-gap wrap">
+        <button className={`btn sm ${on ? 'primary' : ''}`} onClick={() => getEditor().set('cropId', on ? null : clip.id)} data-testid="crop-toggle">
+          {on ? 'Concluir corte' : 'Cortar'}
+        </button>
+        {hasCrop && (
+          <button
+            className="btn sm ghost"
+            onClick={() =>
+              apply((p) => {
+                const cur = p.clips.find((x) => x.id === clip.id);
+                if (!cur || (cur.type !== 'video' && cur.type !== 'image') || !cur.crop) return p;
+                const tr = removeCrop(cur.transform, cur.crop);
+                return patchClip(p, clip.id, { transform: tr, crop: undefined } as Partial<Clip>);
+              })
+            }
+          >
+            Remover corte
+          </button>
+        )}
+      </div>
+      {on && <p className="hint">Arraste as alças das bordas (em cima, embaixo, esquerda e direita) no vídeo para cortar.</p>}
+    </div>
   );
 }
 
@@ -301,13 +339,44 @@ function AudioSection({ clip }: { clip: Extract<Clip, { type: 'video' | 'audio' 
       <Slider label="Entrada" value={clip.fadeIn} min={0} max={5} step={0.1} onChange={(v) => patch(clip.id, { fadeIn: v } as Partial<Clip>, `fi-${clip.id}`)} format={(v) => `${v.toFixed(1)} s`} />
       <Slider label="Saída" value={clip.fadeOut} min={0} max={5} step={0.1} onChange={(v) => patch(clip.id, { fadeOut: v } as Partial<Clip>, `fo-${clip.id}`)} format={(v) => `${v.toFixed(1)} s`} />
       <div className="field">
-        <span>Velocidade</span>
+        <span>Disfarçar voz</span>
         <Seg
-          value={String(clip.speed)}
-          options={['0.5', '0.75', '1', '1.25', '1.5', '2'].map((v) => ({ v, label: `${v}×` }))}
-          onChange={(v) => apply((p) => setSpeed(p, clip.id, Number(v)))}
+          value={clip.voice ?? 'normal'}
+          options={[
+            { v: 'normal', label: 'Normal' },
+            { v: 'high', label: 'Aguda' },
+            { v: 'low', label: 'Grave' },
+          ]}
+          onChange={(v) => patch(clip.id, { voice: v } as Partial<Clip>)}
         />
       </div>
+    </Section>
+  );
+}
+
+const SPEEDS = [0.25, 0.5, 0.75, 1, 1.25, 1.5, 2, 3, 4];
+
+/** Velocidade (como no CapCut): acelera ou desacelera o trecho; a duração na timeline acompanha. */
+function SpeedSection({ clip }: { clip: Extract<Clip, { type: 'video' | 'audio' }> }) {
+  return (
+    <Section title="Velocidade">
+      <div className="speed-chips">
+        {SPEEDS.map((v) => (
+          <button key={v} className={`btn sm ${Math.abs(clip.speed - v) < 0.001 ? 'primary' : ''}`} onClick={() => apply((p) => setSpeed(p, clip.id, v))} data-testid={`speed-${v}`}>
+            {String(v).replace('.', ',')}×
+          </button>
+        ))}
+      </div>
+      <Slider
+        label="Ajuste fino"
+        value={clip.speed}
+        min={0.25}
+        max={4}
+        step={0.05}
+        onChange={(v) => apply((p) => setSpeed(p, clip.id, v), `spd-${clip.id}`)}
+        format={(v) => `${v.toFixed(2).replace('.', ',')}×`}
+      />
+      <p className="hint">O áudio acompanha a velocidade sem mudar o tom da voz.</p>
     </Section>
   );
 }

@@ -15,10 +15,11 @@ import {
 } from '../core/factory';
 import { uid } from '../core/id';
 import { clipEnd, deleteClips, duplicateClip, findClip, placeClip, projectDuration, splitClip } from '../core/timeline';
-import { activeFrame, applyFrame, coverWindow, getFrame } from '../core/frames';
+import { coverWindow, fitVideosToFrame, frameAt, getFrame, insertFrame } from '../core/frames';
 import { getEditor } from '../state/store';
 import { preview } from '../engine/preview';
-import { effectiveTransform } from '../core/edit';
+import { effectiveTransform, patchClip } from '../core/edit';
+import { ensureOutroAudio } from './importer';
 
 const st = getEditor;
 
@@ -26,9 +27,19 @@ const st = getEditor;
  * Adiciona mídia EXATAMENTE na agulha (ou no ponto de soltura). Vídeo tenta a
  * trilha principal; se ali já houver vídeo naquele instante, vai para uma camada.
  */
+/** Último item da biblioteca inserido (evita duplicar com toque duplo / clique após arrastar). */
+let lastAdd = { id: '', at: 0 };
+export function recentlyAdded(mediaId: string): boolean {
+  const now = Date.now();
+  const dup = lastAdd.id === mediaId && now - lastAdd.at < 700;
+  lastAdd = { id: mediaId, at: now };
+  return dup;
+}
+
 export function addMedia(m: MediaAsset, at?: number) {
   const s = st();
   if (!s.project) return;
+  if (recentlyAdded(m.id)) return;
   if (m.status !== 'ready') {
     s.notify('Aguarde o processamento do arquivo.', 'info');
     return;
@@ -39,7 +50,7 @@ export function addMedia(m: MediaAsset, at?: number) {
   if (m.kind === 'video') {
     const main = p.tracks.find((tr) => tr.kind === 'visual');
     clip = createVideoClip(p, m, t);
-    const frame = activeFrame(p);
+    const frame = frameAt(p, t);
     if (frame) clip.transform = coverWindow(getFrame(frame.frame), p.width, p.height, clip.transform.width / clip.transform.height);
     s.apply((pr) => placeClip(pr, clip, main?.id));
   } else if (m.kind === 'image') {
@@ -85,13 +96,30 @@ export function addBlur(rect: { x: number; y: number; width: number; height: num
   s.set('tool', 'select');
 }
 
-/** Aplica uma moldura: um único clipe na timeline, substituindo a moldura anterior. */
+/** Insere uma moldura na agulha, como item normal da timeline (pode haver várias). */
 export function applyFrameCmd(id: string) {
   const s = st();
   if (!s.project) return;
+  // moldura selecionada: trocar o modelo dela (como trocar o estilo no CapCut);
+  // sem moldura selecionada: insere uma nova na agulha (pode haver várias)
+  const selected = s.selection.length === 1 ? s.project.clips.find((c) => c.id === s.selection[0] && c.type === 'frame') : undefined;
+  if (selected && selected.type === 'frame') {
+    if (selected.frame === id) return;
+    const def = getFrame(id);
+    s.apply((p) =>
+      fitVideosToFrame(
+        patchClip(p, selected.id, { frame: id, name: `Moldura · ${def.name}` } as Partial<Clip>),
+        def,
+        selected.start,
+        selected.start + selected.duration,
+      ),
+    );
+    return;
+  }
   let clipId = '';
+  const at = s.time;
   s.apply((p) => {
-    const r = applyFrame(p, id);
+    const r = insertFrame(p, id, at);
     clipId = r.clipId;
     return r.project;
   });
@@ -105,7 +133,7 @@ export function resetClip(id: string) {
   if (!p) return;
   const c = findClip(p, id);
   if (!c) return;
-  const frame = activeFrame(p);
+  const frame = frameAt(p, c.start);
   const keep = { id: c.id, trackId: c.trackId, start: c.start, duration: c.duration, name: c.name };
   let next: Clip = c;
   switch (c.type) {
@@ -137,10 +165,8 @@ export function resetClip(id: string) {
       next = { ...c, intensity: 60, mode: 'blur', keyframes: [], transform: { ...c.transform, rotation: 0, opacity: 1 } };
       break;
     case 'frame': {
-      s.apply((pr) => {
-        const r = applyFrame(pr, c.frame);
-        return { ...r.project, clips: r.project.clips.map((x) => (x.id === r.clipId ? { ...x, ...keep } : x)) };
-      });
+      // reenquadra os vídeos do trecho desta moldura
+      s.apply((pr) => fitVideosToFrame(pr, getFrame(c.frame), c.start, c.start + c.duration));
       s.select([id]);
       return;
     }
@@ -338,4 +364,30 @@ export function nudge(dx: number, dy: number) {
     }
     return pr;
   }, 'nudge');
+}
+
+/**
+ * Encerramento estilo TikTok: tela final com a logo e o @perfil + som de
+ * encerramento, colocados juntos logo depois do fim do vídeo.
+ */
+export async function addOutro() {
+  const s = st();
+  if (!s.project) return;
+  const start = projectDuration(s.project);
+  const c = createTextClip(s.project, 'pn-encerramento', start);
+  // tela final ocupa o quadro inteiro (sem faixas acima e abaixo)
+  c.transform = { ...c.transform, x: s.project.width / 2, y: s.project.height / 2, width: s.project.width, height: s.project.height };
+  s.apply((p) => placeClip(p, c));
+  s.select([c.id]);
+  s.setTime(start);
+  try {
+    const m = await ensureOutroAudio();
+    const cur = st();
+    if (!cur.project || !cur.project.clips.some((x) => x.id === c.id)) return;
+    const a = createAudioClip(cur.project, m, start);
+    a.name = 'Som do encerramento';
+    cur.apply((p) => placeClip(p, a), `outro-${c.id}`);
+  } catch (e) {
+    st().notify(`Encerramento sem som: ${(e as Error).message}`, 'error');
+  }
 }

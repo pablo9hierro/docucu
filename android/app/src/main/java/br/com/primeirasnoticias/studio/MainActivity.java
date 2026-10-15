@@ -19,6 +19,7 @@ public class MainActivity extends BridgeActivity {
 
     @Override
     public void onCreate(Bundle savedInstanceState) {
+        registerPlugin(KeepAlivePlugin.class);
         super.onCreate(savedInstanceState);
 
         // Mesmo comportamento em qualquer Android (o 15 força "edge-to-edge"):
@@ -45,5 +46,25 @@ public class MainActivity extends BridgeActivity {
         WebView webView = getBridge().getWebView();
         webView.getSettings().setTextZoom(100);
         webView.setBackgroundColor(BG);
+    }
+
+    // Exportando: o WebView não pausa ao sair do app (a notificação mantém o processo vivo)
+    @Override
+    public void onPause() {
+        super.onPause();
+        keepRunning();
+    }
+
+    @Override
+    public void onStop() {
+        super.onStop();
+        keepRunning();
+    }
+
+    private void keepRunning() {
+        if (!KeepAlivePlugin.active || getBridge() == null) return;
+        WebView wv = getBridge().getWebView();
+        wv.onResume();
+        wv.resumeTimers();
     }
 }

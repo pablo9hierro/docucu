@@ -6,7 +6,8 @@
 import type { Clip, FrameClip, Project, Transform } from './model';
 import { fitCover } from './factory';
 import { uid } from './id';
-import { newTrack, projectDuration } from './timeline';
+import { newTrack } from './timeline';
+import { graphicDuration } from './factory';
 
 interface Rect {
   x: number;
@@ -98,48 +99,74 @@ export function coverWindow(def: FrameDef, W: number, H: number, ratio: number):
   return { ...tr, x: win.x + win.w / 2, y: win.y + win.h / 2 };
 }
 
-export function activeFrame(p: Project): FrameClip | undefined {
-  return p.clips.find((c): c is FrameClip => c.type === 'frame');
+/** Moldura ativa no instante `t` (a de cima, se houver mais de uma). */
+export function frameAt(p: Project, t: number): FrameClip | undefined {
+  let found: FrameClip | undefined;
+  for (const track of p.tracks) {
+    for (const c of p.clips) {
+      if (c.type === 'frame' && c.trackId === track.id && t >= c.start && t < c.start + c.duration) found = c;
+    }
+  }
+  return found;
+}
+
+/** Enquadra na janela da moldura os vídeos que tocam durante o trecho [start, end). */
+export function fitVideosToFrame(p: Project, def: FrameDef, start: number, end: number): Project {
+  const W = p.width;
+  const H = p.height;
+  return {
+    ...p,
+    clips: p.clips.map((c): Clip => {
+      if (c.type !== 'video' || c.start >= end || c.start + c.duration <= start) return c;
+      const ratio = c.transform.width / c.transform.height;
+      return { ...c, transform: { ...coverWindow(def, W, H, ratio), opacity: c.transform.opacity }, keyframes: [], backdrop: 'none' };
+    }),
+  };
 }
 
 /**
- * Aplica uma moldura: substitui a anterior, cria UM clipe numa trilha logo
- * acima da principal e enquadra os vídeos na janela.
+ * Insere uma moldura como item normal da timeline, na agulha (`start`), com a
+ * mesma duração padrão dos outros itens. Pode haver várias: cada uma fica numa
+ * trilha de molduras logo acima da principal (abaixo das manchetes) e enquadra
+ * os vídeos do seu trecho.
  */
-export function applyFrame(input: Project, frameId: string): { project: Project; clipId: string } {
+export function insertFrame(input: Project, frameId: string, start: number): { project: Project; clipId: string } {
   const def = getFrame(frameId);
   const W = input.width;
   const H = input.height;
-  const old = activeFrame(input);
+  const duration = graphicDuration(input, start, null);
+  const end = start + duration;
   let tracks = input.tracks;
-  let trackId = old?.trackId;
+  // trilhas de moldura: só contêm molduras (ou estão vazias e se chamam Moldura)
+  const isFrameTrack = (id: string) => {
+    const tr = tracks.find((x) => x.id === id)!;
+    const own = input.clips.filter((c) => c.trackId === id);
+    return tr.kind === 'visual' && (own.length ? own.every((c) => c.type === 'frame') : tr.name.startsWith('Moldura'));
+  };
+  const frameTracks = tracks.filter((x) => x.kind === 'visual' && isFrameTrack(x.id));
+  let trackId = frameTracks.find((x) => !input.clips.some((c) => c.trackId === x.id && c.start < end - 1e-6 && c.start + c.duration > start + 1e-6))?.id;
   if (!trackId) {
-    const t = newTrack('visual', 'Moldura');
+    const n = frameTracks.length;
+    const t = newTrack('visual', n ? `Moldura ${n + 1}` : 'Moldura');
     const mainIdx = tracks.findIndex((x) => x.kind === 'visual');
-    tracks = [...tracks.slice(0, mainIdx + 1), t, ...tracks.slice(mainIdx + 1)];
+    const lastFrameIdx = frameTracks.length ? tracks.indexOf(frameTracks[frameTracks.length - 1]!) : mainIdx;
+    tracks = [...tracks.slice(0, lastFrameIdx + 1), t, ...tracks.slice(lastFrameIdx + 1)];
     trackId = t.id;
   }
-  const dur = projectDuration(input) || 15;
   const clip: FrameClip = {
     type: 'frame',
     id: uid(),
     trackId,
     name: `Moldura · ${def.name}`,
-    start: old?.start ?? 0,
-    duration: old ? old.duration : dur,
+    start,
+    duration,
     transform: { x: W / 2, y: H / 2, width: W, height: H, rotation: 0, opacity: 1 },
     keyframes: [],
     animIn: { type: 'none', duration: 1 },
     animOut: { type: 'none', duration: 1 },
     frame: def.id,
-    text: old?.text || DEFAULT_TICKER,
+    text: DEFAULT_TICKER,
   };
-  const clips = input.clips
-    .filter((c) => c.type !== 'frame')
-    .map((c): Clip => {
-      if (c.type !== 'video') return c;
-      const ratio = c.transform.width / c.transform.height;
-      return { ...c, transform: { ...coverWindow(def, W, H, ratio), opacity: c.transform.opacity }, keyframes: [], backdrop: 'none' };
-    });
-  return { project: { ...input, tracks, clips: [...clips, clip] }, clipId: clip.id };
+  const fitted = fitVideosToFrame({ ...input, tracks }, def, start, end);
+  return { project: { ...fitted, clips: [...fitted.clips, clip] }, clipId: clip.id };
 }

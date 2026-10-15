@@ -13,6 +13,8 @@ import { ensureFonts } from '../render/fonts';
 import { ensureBrandAssets } from '../render/brandAssets';
 import { exportFileName, type ExportProgress, type ExportSettings, type Exporter } from '../platform/types';
 import { prepareFrameSource } from './frameSource';
+import { createPitchShifter } from './pitchShifter';
+import { abortable, abortError, throwIfAborted, waitQueue } from './abortable';
 
 const SAMPLE_RATE = 48000;
 
@@ -86,7 +88,15 @@ async function mixAudio(project: Project, media: Record<string, MediaAsset>, dur
       g.setValueAtTime(seg.volume, Math.max(seg.start, end - seg.fadeOut));
       g.linearRampToValueAtTime(0, end);
     }
-    src.connect(gain).connect(ctx.destination);
+    if (Math.abs(seg.pitch - 1) > 1e-3) {
+      // disfarce de voz (mesmo efeito do preview)
+      const shifter = createPitchShifter(ctx, seg.pitch, seg.start);
+      src.connect(shifter.input);
+      shifter.output.connect(gain);
+    } else {
+      src.connect(gain);
+    }
+    gain.connect(ctx.destination);
     src.start(seg.start, seg.sourceIn, seg.duration * seg.speed);
   }
   return ctx.startRendering();
@@ -127,7 +137,9 @@ export async function exportWithWebCodecs(
   }
   if (!vcfg) throw new Error('O codificador H.264 deste aparelho não aceitou o formato do vídeo.');
 
-  const audioBuffer = await mixAudio(project, media, settings.duration);
+  throwIfAborted(signal);
+  const audioBuffer = await abortable(mixAudio(project, media, settings.duration), signal);
+  throwIfAborted(signal);
   const acfg = audioBuffer ? await pickAudioConfig() : null;
 
   const muxer = new Muxer({
@@ -142,6 +154,10 @@ export async function exportWithWebCodecs(
   // prepara os vídeos ANTES de ligar o codificador: o navegador recolhe
   // codificadores ociosos ("Codec reclaimed due to inactivity")
   const src = await prepareFrameSource(project, media);
+  if (signal.aborted) {
+    src.dispose();
+    throw abortError();
+  }
   const makeEncoder = () => {
     const enc = new VideoEncoder({
       output: (chunk, meta) => muxer.addVideoChunk(chunk, meta),
@@ -161,9 +177,9 @@ export async function exportWithWebCodecs(
 
   try {
     for (let i = 0; i < total; i++) {
-      if (signal.aborted) throw new DOMException('Exportação cancelada', 'AbortError');
+      throwIfAborted(signal);
       const t = i / fps;
-      await src.seek(t);
+      await abortable(src.seek(t), signal);
       renderFrame(ctx, project, t, src.sources, { editorHints: false });
       let forceKey = false;
       if (encodeError || venc.state === 'closed') {
@@ -178,11 +194,11 @@ export async function exportWithWebCodecs(
       venc.encode(frame, { keyFrame: forceKey || i % (fps * 2) === 0 });
       frame.close();
       // controla a fila do codificador para não estourar a memória do aparelho
-      while (venc.encodeQueueSize > 6) await new Promise((r) => setTimeout(r, 2));
+      await waitQueue(venc, 6, signal);
       const elapsed = (performance.now() - t0) / 1000;
       onProgress({ phase: 'rendering', frame: i + 1, total, fps: (i + 1) / Math.max(elapsed, 0.001) });
     }
-    await venc.flush();
+    await abortable(venc.flush(), signal);
     if (encodeError) throw encodeError;
     onProgress({ phase: 'encoding', frame: total, total, fps: 0 });
 
@@ -210,10 +226,13 @@ export async function exportWithWebCodecs(
         });
         aenc.encode(data);
         data.close();
-        while (aenc.encodeQueueSize > 16) await new Promise((r) => setTimeout(r, 1));
+        await waitQueue(aenc, 16, signal);
       }
-      await aenc.flush();
-      aenc.close();
+      try {
+        await abortable(aenc.flush(), signal);
+      } finally {
+        if (aenc.state !== 'closed') aenc.close();
+      }
       if (encodeError) throw encodeError;
     }
     muxer.finalize();

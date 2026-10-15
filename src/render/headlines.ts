@@ -10,7 +10,7 @@ import { clamp, ease, seg } from '../core/animation';
 import { FONTS, PN } from '../core/brand';
 import { getPreset } from '../core/presets';
 import { applyFont, drawLines, fitText, lineX, type FontSpec } from './text';
-import { drawInstagramGlyph, drawLogo, LOGO_RATIO } from './brandAssets';
+import { brandImage, drawInstagramGlyph, drawLogo, LOGO_RATIO } from './brandAssets';
 import { incrust } from './incrust';
 
 type C = CanvasRenderingContext2D;
@@ -34,7 +34,7 @@ const SERIF_BLACK: FontSpec = { family: FONTS.serif, weight: 900 };
 const SERIF_ITALIC: FontSpec = { family: FONTS.serif, weight: 600, style: 'italic' };
 const IMPACT: FontSpec = { family: FONTS.impact, weight: 400 };
 
-const LR = LOGO_RATIO.horizontal;
+
 const eo = ease['ease-out'];
 const eio = ease['ease-in-out'];
 
@@ -77,6 +77,28 @@ function clipReveal(ctx: C, x: number, y: number, w: number, h: number, f: numbe
   ctx.clip();
 }
 
+/**
+ * Acabamento de TV nas placas: reflexo de luz no topo e fio de luz azul na base.
+ * Não altera a opacidade da placa (continua cobrindo o que estiver atrás).
+ */
+function sheen(ctx: C, x: number, y: number, w: number, h: number) {
+  if (w <= 0 || h <= 0) return;
+  ctx.save();
+  const g = ctx.createLinearGradient(0, y, 0, y + h * 0.5);
+  g.addColorStop(0, 'rgba(255,255,255,0.16)');
+  g.addColorStop(1, 'rgba(255,255,255,0)');
+  ctx.fillStyle = g;
+  ctx.fillRect(x, y, w, h * 0.5);
+  const lh = Math.max(2, h * 0.035);
+  const lg = ctx.createLinearGradient(x, 0, x + w, 0);
+  lg.addColorStop(0, 'rgba(56,182,255,0)');
+  lg.addColorStop(0.5, 'rgba(56,182,255,0.95)');
+  lg.addColorStop(1, 'rgba(56,182,255,0)');
+  ctx.fillStyle = lg;
+  ctx.fillRect(x, y + h - lh, w, lh);
+  ctx.restore();
+}
+
 function stagger(p: number, start: number, span: number, step: number) {
   return (i: number) => eo(seg(p, start + i * step, start + i * step + span));
 }
@@ -98,6 +120,7 @@ function faixa(ctx: C, c: TextClip, { w, h, p, t }: HeadlineArgs) {
   const r2 = Math.max(3, h * 0.022);
   // marca incrustada no centro da faixa, atrás da manchete
   incrust(ctx, { x: 0, y: top + r1 + r2, w, h: h - top - r1 - r2 }, { anchor: 'center', scale: 0.72, alpha: 0.2, p: seg(p, 0.15, 1), t });
+  sheen(ctx, 0, top, w, h - top);
   ctx.fillStyle = shade(s.primary, -0.5);
   ctx.fillRect(0, top, w, r1);
   ctx.fillStyle = s.accent;
@@ -170,6 +193,7 @@ function urgente(ctx: C, c: TextClip, { w, h, p, t }: HeadlineArgs) {
   ctx.fillStyle = g;
   ctx.fillRect(boxX, boxY, boxW, boxH);
   incrust(ctx, { x: boxX, y: boxY, w: boxW, h: boxH }, { anchor: 'right', scale: 0.84, alpha: 0.24, p: seg(p, 0.3, 1), t });
+  sheen(ctx, boxX, boxY, boxW, boxH);
   const pad = boxH * 0.1;
   const fit = fitText(ctx, c.fields.title, SANS_BLACK, { maxW: boxW - pad * 2.2, maxH: boxH - pad * 2, maxSize: boxH * 0.3 * fs, lineHeight: 1.05, upper: s.uppercase });
   const lineIn = stagger(p, 0.4, 0.3, 0.07);
@@ -198,6 +222,7 @@ function tarja(ctx: C, c: TextClip, { w, h, p, t }: HeadlineArgs) {
   ctx.fillStyle = g;
   ctx.fillRect(boxX, 0, w - boxX, h);
   incrust(ctx, { x: boxX, y: 0, w: w - boxX, h }, { anchor: 'right', scale: 0.84, alpha: 0.24, p: seg(p, 0.3, 1), t });
+  sheen(ctx, boxX, 0, w - boxX, h);
   const pad = h * 0.14;
   const areaW = w - boxX - pad * 2;
   const fit = fitText(ctx, c.fields.title, COND, { maxW: areaW, maxH: h - pad * 2, maxSize: h * 0.36 * fs, lineHeight: 1.06, upper: s.uppercase });
@@ -216,8 +241,9 @@ function largo(ctx: C, c: TextClip, { w, h, p, t }: HeadlineArgs) {
   const open = eio(seg(p, 0, 0.45));
   const bandH = h * open;
   const y = (h - bandH) / 2;
-  ctx.fillStyle = withAlpha(s.primary, 0.92);
+  ctx.fillStyle = s.primary;
   ctx.fillRect(0, y, w, bandH);
+  sheen(ctx, 0, y, w, bandH);
   incrust(ctx, { x: 0, y, w, h: bandH }, { anchor: 'right', scale: 0.8, alpha: 0.22, p: seg(p, 0.3, 1), t });
   const rl = Math.max(2, h * 0.025);
   ctx.fillStyle = s.accent;
@@ -253,6 +279,7 @@ function serif(ctx: C, c: TextClip, { w, h, p, t }: HeadlineArgs) {
   ctx.fillStyle = g;
   ctx.fillRect(0, 0, w, h - barH);
   incrust(ctx, { x: 0, y: 0, w, h: h - barH }, { anchor: 'center', scale: 0.82, alpha: 0.18, p: seg(p, 0.2, 1), t });
+  sheen(ctx, 0, 0, w, h - barH);
   ctx.restore();
   const segs = [shade(s.primary, -0.3), s.primary, PN.blue, s.accent, PN.white];
   const sw = w / segs.length;
@@ -384,6 +411,7 @@ function nome(ctx: C, c: TextClip, { w, h, p, t }: HeadlineArgs) {
   ctx.fillRect(barW, 0, w - barW, h);
   // GC: logo horizontal inteira incrustada à direita (aprovada assim)
   incrust(ctx, { x: barW, y: 0, w: w - barW, h }, { anchor: 'right', scale: 0.84, alpha: 0.24, p: seg(p, 0.3, 1), t, mode: 'banner' });
+  sheen(ctx, barW, 0, w - barW, h);
   const pad = h * 0.18;
   ctx.globalAlpha *= eo(seg(p, 0.4, 0.8));
   ctx.textBaseline = 'middle';
@@ -424,7 +452,7 @@ function aoVivo(ctx: C, c: TextClip, { h, p, t }: HeadlineArgs) {
     const locW = ctx.measureText(loc).width + h * 0.7;
     ctx.save();
     clipReveal(ctx, lw, 0, locW, h, eo(seg(p, 0.35, 0.85)));
-    ctx.fillStyle = withAlpha(s.accent, 0.94);
+    ctx.fillStyle = s.accent;
     ctx.fillRect(lw, 0, locW, h);
     incrust(ctx, { x: lw, y: 0, w: locW, h }, { anchor: 'right', scale: 0.88, alpha: 0.32, p: seg(p, 0.45, 1), t });
     ctx.fillStyle = PN.white;
@@ -495,8 +523,9 @@ function citacao(ctx: C, c: TextClip, { w, h, p, t }: HeadlineArgs) {
   const a = eo(seg(p, 0, 0.4));
   ctx.save();
   ctx.globalAlpha *= a;
-  ctx.fillStyle = withAlpha(s.primary, 0.92);
+  ctx.fillStyle = s.primary;
   ctx.fillRect(0, 0, w, h);
+  sheen(ctx, 0, 0, w, h);
   ctx.restore();
   incrust(ctx, { x: 0, y: 0, w, h }, { anchor: 'right', scale: 0.46, alpha: 0.2, p: seg(p, 0.2, 1), t });
   ctx.fillStyle = s.accent;
@@ -582,7 +611,7 @@ function numero(ctx: C, c: TextClip, { w, h, p, t }: HeadlineArgs) {
 /** Selo oficial: logo + símbolo do Instagram + @primeirasnoticias_ (também usado pelas molduras). */
 export function drawHandle(ctx: C, w: number, h: number, align: 'left' | 'center' | 'right', f = 1) {
   const lh = h * 0.86;
-  const lw = lh * LR;
+  const lw = lh * LOGO_RATIO.horizontal; // proporção atual (a logo pode ser trocada)
   const gs = h * 0.56;
   applyFont(ctx, SANS_BOLD, h * 0.5);
   const tw = ctx.measureText(PN.handle).width;
@@ -592,8 +621,8 @@ export function drawHandle(ctx: C, w: number, h: number, align: 'left' | 'center
   ctx.save();
   ctx.globalAlpha *= f;
   const g = ctx.createLinearGradient(0, 0, 0, h);
-  g.addColorStop(0, withAlpha(PN.deep, 0.94));
-  g.addColorStop(1, withAlpha(PN.navy, 0.94));
+  g.addColorStop(0, PN.deep);
+  g.addColorStop(1, PN.navy);
   ctx.fillStyle = g;
   ctx.fillRect(x0, 0, total, h);
   ctx.fillStyle = PN.sky;
@@ -652,7 +681,107 @@ function plain(ctx: C, c: TextClip, { w, h }: HeadlineArgs) {
   noShadow(ctx);
 }
 
+/**
+ * Encerramento estilo TikTok: fundo azul da marca com luz pulsando, a logo
+ * redonda entra com salto e "glitch" (cópias ciano/vermelho que se acomodam),
+ * flutua de leve, e o @primeirasnoticias_ com o símbolo do Instagram sobe por baixo.
+ */
+function encerramento(ctx: C, c: TextClip, { w, h, p, t }: HeadlineArgs) {
+  // fundo
+  const g = ctx.createLinearGradient(0, 0, 0, h);
+  g.addColorStop(0, '#061433');
+  g.addColorStop(0.55, PN.deep);
+  g.addColorStop(1, '#040c1f');
+  ctx.fillStyle = g;
+  ctx.fillRect(0, 0, w, h);
+  const pulse = 0.75 + 0.25 * Math.sin(t * Math.PI * 1.6);
+  const cy = h * 0.42;
+  const rg = ctx.createRadialGradient(w / 2, cy, 0, w / 2, cy, w * 0.75);
+  rg.addColorStop(0, `rgba(56,182,255,${0.42 * pulse})`);
+  rg.addColorStop(1, 'rgba(56,182,255,0)');
+  ctx.fillStyle = rg;
+  ctx.fillRect(0, 0, w, h);
+  // feixe de luz atravessando
+  const sweep = ((t * 0.55) % 1.6) - 0.3;
+  ctx.save();
+  ctx.globalCompositeOperation = 'screen';
+  const sx = sweep * w * 1.4;
+  const sg = ctx.createLinearGradient(sx - w * 0.2, 0, sx + w * 0.2, 0);
+  sg.addColorStop(0, 'rgba(150,215,255,0)');
+  sg.addColorStop(0.5, 'rgba(150,215,255,0.12)');
+  sg.addColorStop(1, 'rgba(150,215,255,0)');
+  ctx.fillStyle = sg;
+  ctx.fillRect(0, 0, w, h);
+  ctx.restore();
+
+  // logo redonda: salto de entrada + glitch que se acomoda + flutuação
+  const img = brandImage('round');
+  const enter = seg(p, 0, 0.6);
+  const s = enter < 1 ? Math.max(0, ease.outBack(enter)) : 1;
+  const lw = w * 0.74;
+  const lh = lw / LOGO_RATIO.round;
+  const fy = Math.sin(t * Math.PI * 0.9) * h * 0.006;
+  if (img && s > 0) {
+    ctx.save();
+    ctx.translate(w / 2, cy + fy);
+    ctx.scale(s, s);
+    const jitter = Math.max(0, 1 - t / 0.9); // o glitch some em ~1 s
+    const off = w * 0.018 * jitter * (0.6 + 0.4 * Math.sin(t * 47));
+    if (off > 0.5) {
+      ctx.globalCompositeOperation = 'screen';
+      ctx.globalAlpha = 0.75;
+      ctx.filter = 'sepia(1) saturate(6) hue-rotate(150deg)';
+      ctx.drawImage(img, -lw / 2 - off, -lh / 2, lw, lh);
+      ctx.filter = 'sepia(1) saturate(6) hue-rotate(-40deg)';
+      ctx.drawImage(img, -lw / 2 + off, -lh / 2, lw, lh);
+      ctx.filter = 'none';
+      ctx.globalCompositeOperation = 'source-over';
+      ctx.globalAlpha = 1;
+    }
+    ctx.shadowColor = 'rgba(56,182,255,0.8)';
+    ctx.shadowBlur = w * 0.05;
+    ctx.drawImage(img, -lw / 2, -lh / 2, lw, lh);
+    ctx.restore();
+  }
+
+  // chamada + @perfil subindo por baixo
+  const hp = eo(seg(p, 0.45, 1));
+  if (hp > 0) {
+    const baseY = h * 0.74 + (1 - hp) * h * 0.05;
+    ctx.save();
+    ctx.globalAlpha *= hp;
+    applyFont(ctx, SANS_SITE, w * 0.034);
+    ctx.fillStyle = PN.sky;
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText((c.fields.kicker || 'Siga para mais notícias').toLocaleUpperCase('pt-BR'), w / 2, baseY - h * 0.055);
+    applyFont(ctx, SANS_BLACK, w * 0.066);
+    const handle = PN.handle;
+    const tw = ctx.measureText(handle).width;
+    const gs = w * 0.075;
+    const gap = w * 0.022;
+    const total = gs + gap + tw;
+    const x0 = (w - total) / 2;
+    drawInstagramGlyph(ctx, x0, baseY - gs / 2, gs);
+    textShadow(ctx, w * 0.066, 0.5);
+    ctx.fillStyle = PN.white;
+    ctx.textAlign = 'left';
+    ctx.fillText(handle, x0 + gs + gap, baseY + w * 0.004);
+    noShadow(ctx);
+    // fio luminoso sob o perfil
+    const lwLine = total * eo(seg(p, 0.6, 1));
+    const lgrad = ctx.createLinearGradient(w / 2 - lwLine / 2, 0, w / 2 + lwLine / 2, 0);
+    lgrad.addColorStop(0, 'rgba(56,182,255,0)');
+    lgrad.addColorStop(0.5, 'rgba(56,182,255,1)');
+    lgrad.addColorStop(1, 'rgba(56,182,255,0)');
+    ctx.fillStyle = lgrad;
+    ctx.fillRect(w / 2 - lwLine / 2, baseY + w * 0.05, lwLine, Math.max(3, w * 0.005));
+    ctx.restore();
+  }
+}
+
 const DRAWERS: Record<string, (ctx: C, c: TextClip, a: HeadlineArgs) => void> = {
+  'pn-encerramento': encerramento,
   'pn-faixa': faixa,
   'pn-urgente': urgente,
   'pn-tarja': tarja,

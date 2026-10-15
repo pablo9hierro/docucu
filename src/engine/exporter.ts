@@ -9,6 +9,7 @@ import { ensureBrandAssets } from '../render/brandAssets';
 import { exportsApi } from '../platform/server';
 import type { ExportProgress, ExportSettings } from '../platform/types';
 import { prepareFrameSource } from './frameSource';
+import { abortable, abortError } from './abortable';
 
 const BATCH = 10;
 
@@ -28,13 +29,24 @@ export async function runExport(
   onProgress({ phase: 'preparing', frame: 0, total: 0, fps: 0 });
   await Promise.all([ensureFonts(), ensureBrandAssets()]);
   const src = await prepareFrameSource(project, media);
+  if (signal.aborted) {
+    src.dispose();
+    throw abortError();
+  }
 
   const canvas = document.createElement('canvas');
   canvas.width = settings.width;
   canvas.height = settings.height;
   const ctx = canvas.getContext('2d', { alpha: false })!;
 
-  const { id, totalFrames } = await exportsApi.start(project, settings);
+  let started: { id: string; totalFrames: number };
+  try {
+    started = await abortable(exportsApi.start(project, settings), signal);
+  } catch (e) {
+    src.dispose();
+    throw e;
+  }
+  const { id, totalFrames } = started;
   let cancelled = false;
   const onAbort = () => {
     cancelled = true;
@@ -49,21 +61,21 @@ export async function runExport(
     for (let i = 0; i < totalFrames; i++) {
       if (cancelled) throw new DOMException('Exportação cancelada', 'AbortError');
       const t = i / settings.fps;
-      await src.seek(t);
+      await abortable(src.seek(t), signal);
       renderFrame(ctx, project, t, src.sources, { editorHints: false });
-      batch.push(await toJpeg(canvas, 0.93));
+      batch.push(await abortable(toJpeg(canvas, 0.93), signal));
       if (batch.length >= BATCH || i === totalFrames - 1) {
         const send = batch;
         batch = [];
-        await inflight; // no máximo um lote em voo
+        await abortable(inflight, signal); // no máximo um lote em voo
         inflight = exportsApi.pushFrames(id, send);
       }
       const elapsed = (performance.now() - t0) / 1000;
       onProgress({ phase: 'rendering', frame: i + 1, total: totalFrames, fps: (i + 1) / Math.max(elapsed, 0.001) });
     }
-    await inflight;
+    await abortable(inflight, signal);
     onProgress({ phase: 'encoding', frame: totalFrames, total: totalFrames, fps: 0 });
-    const r = await exportsApi.finish(id);
+    const r = await abortable(exportsApi.finish(id), signal);
     onProgress({ phase: 'done', frame: totalFrames, total: totalFrames, fps: 0 });
     return { id, file: r.file };
   } finally {

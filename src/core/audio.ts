@@ -16,7 +16,12 @@ export interface AudioSegment {
   volume: number;
   fadeIn: number;
   fadeOut: number;
+  /** fator de tom do disfarce de voz (1 = normal) */
+  pitch: number;
 }
+
+/** Fatores de tom do disfarce de voz (aguda / grave). */
+export const VOICE_PITCH = { normal: 1, high: 1.38, low: 0.74 } as const;
 
 export function buildAudioPlan(p: Project): AudioSegment[] {
   const out: AudioSegment[] = [];
@@ -37,6 +42,7 @@ export function buildAudioPlan(p: Project): AudioSegment[] {
       volume: c.volume,
       fadeIn: Math.min(c.fadeIn, c.duration / 2),
       fadeOut: Math.min(c.fadeOut, c.duration / 2),
+      pitch: VOICE_PITCH[c.voice ?? 'normal'],
     });
   }
   return out;
@@ -92,6 +98,8 @@ export function buildFfmpegAudioGraph(
         .filter((x) => Math.abs(x - 1) > 1e-4)
         .map((x) => `atempo=${f(x)}`),
       'aformat=sample_fmts=fltp:sample_rates=48000:channel_layouts=stereo',
+      // disfarce de voz: muda o tom e devolve a duração original
+      ...(Math.abs(s.pitch - 1) > 1e-3 ? [`asetrate=${Math.round(48000 * s.pitch)}`, 'aresample=48000', `atempo=${f(1 / s.pitch)}`] : []),
       `volume=${f(s.volume)}`,
     ];
     if (s.fadeIn > 0) chain.push(`afade=t=in:st=0:d=${f(s.fadeIn)}`);

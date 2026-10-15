@@ -6,16 +6,17 @@ import horizontalUrl from '../assets/pn-logo-horizontal.png';
 import normalUrl from '../assets/pn-logo-normal.png';
 import watermarkUrl from '../assets/pn-logo-watermark.jpg';
 import symbolUrl from '../assets/pn-symbol-watermark.jpg';
+import roundUrl from '../assets/pn-logo-round.png';
 
 /**
  * `watermark` = logo horizontal sobre fundo preto; `symbol` = só o símbolo "pn"
  * sobre fundo preto (carimbo das manchetes, mesclagem "screen").
  */
-export type BrandLogo = 'horizontal' | 'normal' | 'watermark' | 'symbol';
+export type BrandLogo = 'horizontal' | 'normal' | 'watermark' | 'symbol' | 'round';
 
-export const LOGO_RATIO: Record<BrandLogo, number> = { horizontal: 1572 / 516, normal: 1214 / 1058, watermark: 1564 / 508, symbol: 612 / 508 };
+export const LOGO_RATIO: Record<BrandLogo, number> = { horizontal: 1572 / 516, normal: 1214 / 1058, watermark: 1564 / 508, symbol: 612 / 508, round: 1238 / 1058 };
 
-const urls: Record<BrandLogo, string> = { horizontal: horizontalUrl, normal: normalUrl, watermark: watermarkUrl, symbol: symbolUrl };
+const urls: Record<BrandLogo, string> = { horizontal: horizontalUrl, normal: normalUrl, watermark: watermarkUrl, symbol: symbolUrl, round: roundUrl };
 const imgs: Partial<Record<BrandLogo, HTMLImageElement>> = {};
 const listeners = new Set<() => void>();
 let ready: Promise<void> | null = null;
@@ -35,13 +36,39 @@ function load(k: BrandLogo): Promise<void> {
 }
 
 export function ensureBrandAssets(): Promise<void> {
-  if (!ready) ready = Promise.all([load('horizontal'), load('normal'), load('watermark'), load('symbol')]).then(() => undefined);
+  if (!ready) ready = Promise.all([load('horizontal'), load('normal'), load('watermark'), load('symbol'), load('round')]).then(() => undefined);
   return ready;
 }
 
 export function brandImage(k: BrandLogo): HTMLImageElement | null {
   if (!ready && typeof document !== 'undefined') void ensureBrandAssets();
   return imgs[k] ?? null;
+}
+
+/**
+ * Logos da moldura escolhidas pelo usuário (horizontal e redonda). `null` volta
+ * para a logo embutida. A proporção é atualizada pela imagem carregada.
+ */
+let version = 0;
+export function brandVersion() {
+  return version;
+}
+export function setLogoOverride(kind: 'horizontal' | 'round', url: string | null): Promise<void> {
+  const src = url ?? urls[kind];
+  if (imgs[kind]?.src && new URL(src, location.href).href === imgs[kind]!.src) return Promise.resolve();
+  return new Promise((resolve) => {
+    const img = new Image();
+    img.decoding = 'async';
+    img.onload = () => {
+      imgs[kind] = img;
+      if (img.naturalWidth && img.naturalHeight) LOGO_RATIO[kind] = img.naturalWidth / img.naturalHeight;
+      version++;
+      listeners.forEach((l) => l());
+      resolve();
+    };
+    img.onerror = () => resolve();
+    img.src = src;
+  });
 }
 
 export function onBrandLoaded(fn: () => void) {

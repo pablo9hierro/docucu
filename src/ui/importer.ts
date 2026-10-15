@@ -83,3 +83,32 @@ export async function loadAllMedia() {
   // retoma o acompanhamento de arquivos ainda em processamento
   for (const m of lib) if (m.status === 'processing') void waitReady(m.id);
 }
+
+/**
+ * Som do encerramento (embutido no app). Na primeira vez é enviado para a
+ * biblioteca de mídia; depois reaproveita o mesmo arquivo.
+ */
+export async function ensureOutroAudio(): Promise<MediaAsset> {
+  const KEY = 'pn-outro-media';
+  const s = getEditor();
+  let cachedId: string | null = null;
+  try {
+    cachedId = localStorage.getItem(KEY);
+  } catch {
+    /* sem armazenamento */
+  }
+  const cached = cachedId ? s.media[cachedId] : undefined;
+  if (cached && cached.status === 'ready') return cached;
+  const { default: url } = await import('../assets/pn-encerramento.m4a');
+  const blob = await (await fetch(url)).blob();
+  const file = new File([blob], 'encerramento-primeiras-noticias.m4a', { type: 'audio/mp4' });
+  const m = await mediaApi.upload(file);
+  getEditor().upsertMedia(m);
+  const ready = await waitReady(m.id);
+  try {
+    localStorage.setItem(KEY, ready.id);
+  } catch {
+    /* sem armazenamento */
+  }
+  return ready;
+}

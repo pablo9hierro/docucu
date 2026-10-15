@@ -1,7 +1,7 @@
 import { expect, test, type Page } from '@playwright/test';
 import { probe, uniqueTestVideo } from './fixtures';
 
-type Clip = { id: string; type: string; start: number; duration: number; transform?: { x: number; y: number; width: number; height: number } };
+type Clip = { id: string; type: string; start: number; duration: number; frame?: string; transform?: { x: number; y: number; width: number; height: number } };
 type Snapshot = { clips: Clip[]; selection: string[]; time: number };
 
 async function state(page: Page): Promise<Snapshot> {
@@ -210,11 +210,22 @@ test('moldura + manchete: cada escolha vira um único item, inserido na agulha',
   let s = await state(page);
   expect(s.clips).toHaveLength(2); // vídeo + 1 moldura
   expect(s.clips.filter((c) => c.type === 'frame')).toHaveLength(1);
-  // trocar de moldura substitui, não acumula
+  // com a moldura selecionada, tocar em outro modelo troca o modelo dela
   await page.getByTestId('frame-central').click();
   s = await state(page);
   expect(s.clips.filter((c) => c.type === 'frame')).toHaveLength(1);
+  expect(s.clips.find((c) => c.type === 'frame')!.frame).toBe('central');
   await page.getByTestId('frame-topo').click();
+  s = await state(page);
+  expect(s.clips.find((c) => c.type === 'frame')!.frame).toBe('topo');
+  // sem seleção, uma nova moldura entra como item normal (várias permitidas)
+  await page.evaluate(() => (window as unknown as { __editor: { getState(): { select(ids: string[]): void } } }).__editor.getState().select([]));
+  await page.getByTestId('frame-central').click();
+  s = await state(page);
+  expect(s.clips.filter((c) => c.type === 'frame')).toHaveLength(2);
+  await page.keyboard.press('Delete');
+  s = await state(page);
+  expect(s.clips.filter((c) => c.type === 'frame')).toHaveLength(1);
 
   await page.getByTestId('preset-pn-faixa').click();
   s = await state(page);

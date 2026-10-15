@@ -155,3 +155,72 @@ export function rectFromPoints(ax: number, ay: number, bx: number, by: number) {
   const h = Math.abs(by - ay);
   return { x: x0 + w / 2, y: y0 + h / 2, width: w, height: h };
 }
+
+export type CropEdge = 'l' | 't' | 'r' | 'b';
+export interface CropValue {
+  l: number;
+  t: number;
+  r: number;
+  b: number;
+}
+export const NO_CROP: CropValue = { l: 0, t: 0, r: 0, b: 0 };
+const MIN_VISIBLE = 0.05;
+
+/**
+ * Arrasta uma borda de corte. `d` = deslocamento do ponteiro ao longo do eixo
+ * local da borda (x para l/r, y para t/b), em pixels do quadro. A parte que
+ * continua visível fica parada no lugar; só a borda arrastada se move.
+ */
+export function dragCrop(tr: Transform, crop: CropValue, edge: CropEdge, d: number): { transform: Transform; crop: CropValue } {
+  const fw = tr.width / Math.max(MIN_VISIBLE, 1 - crop.l - crop.r); // largura da mídia inteira
+  const fh = tr.height / Math.max(MIN_VISIBLE, 1 - crop.t - crop.b);
+  const c = { ...crop };
+  let dw = 0; // variação de largura (positivo = cresce)
+  let dh = 0;
+  let sx = 0; // deslocamento do centro no eixo local
+  let sy = 0;
+  if (edge === 'l') {
+    c.l = clampN(crop.l + d / fw, 0, 1 - crop.r - MIN_VISIBLE);
+    dw = -(c.l - crop.l) * fw;
+    sx = -dw / 2;
+  } else if (edge === 'r') {
+    c.r = clampN(crop.r - d / fw, 0, 1 - crop.l - MIN_VISIBLE);
+    dw = (crop.r - c.r) * fw;
+    sx = dw / 2;
+  } else if (edge === 't') {
+    c.t = clampN(crop.t + d / fh, 0, 1 - crop.b - MIN_VISIBLE);
+    dh = -(c.t - crop.t) * fh;
+    sy = -dh / 2;
+  } else {
+    c.b = clampN(crop.b - d / fh, 0, 1 - crop.t - MIN_VISIBLE);
+    dh = (crop.b - c.b) * fh;
+    sy = dh / 2;
+  }
+  const shift = rotate(sx, sy, tr.rotation);
+  return {
+    crop: c,
+    transform: { ...tr, width: tr.width + dw, height: tr.height + dh, x: tr.x + shift.x, y: tr.y + shift.y },
+  };
+}
+
+/** Remove o corte devolvendo a mídia inteira, sem mover o que já estava visível. */
+export function removeCrop(tr: Transform, crop: CropValue): Transform {
+  const fw = tr.width / Math.max(MIN_VISIBLE, 1 - crop.l - crop.r);
+  const fh = tr.height / Math.max(MIN_VISIBLE, 1 - crop.t - crop.b);
+  // centro da mídia inteira em relação ao centro da parte visível (eixo local)
+  const sx = ((crop.r - crop.l) * fw) / 2;
+  const sy = ((crop.b - crop.t) * fh) / 2;
+  const shift = rotate(sx, sy, tr.rotation);
+  return { ...tr, width: fw, height: fh, x: tr.x + shift.x, y: tr.y + shift.y };
+}
+
+/** Retângulo (no eixo local) da mídia inteira, relativo ao centro da parte visível. */
+export function fullMediaRect(tr: Transform, crop: CropValue) {
+  const fw = tr.width / Math.max(MIN_VISIBLE, 1 - crop.l - crop.r);
+  const fh = tr.height / Math.max(MIN_VISIBLE, 1 - crop.t - crop.b);
+  return { x: -tr.width / 2 - crop.l * fw, y: -tr.height / 2 - crop.t * fh, w: fw, h: fh };
+}
+
+function clampN(v: number, lo: number, hi: number) {
+  return v < lo ? lo : v > hi ? hi : v;
+}

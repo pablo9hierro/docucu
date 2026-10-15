@@ -2,11 +2,11 @@
  * Renderizador único da cena. O preview e a exportação chamam `renderFrame`
  * com o mesmo projeto e o mesmo tempo — o que se vê é o que se exporta.
  */
-import type { Adjust, BlurClip, FrameClip, ImageClip, Project, ShapeClip, SponsorsClip, VideoClip } from '../core/model';
+import type { Adjust, BlurClip, Crop, FrameClip, ImageClip, Project, ShapeClip, SponsorsClip, VideoClip } from '../core/model';
 import { evaluateScene, type SceneItem } from '../core/scene';
-import { getFrame, frameWindow } from '../core/frames';
+import { getFrame, frameWindow, type FrameDef } from '../core/frames';
 import { drawHandle, drawHeadline, drawTicker } from './headlines';
-import { brandImage, drawLogo, LOGO_RATIO } from './brandAssets';
+import { brandImage, brandVersion, drawLogo, LOGO_RATIO } from './brandAssets';
 import { applyFont } from './text';
 import { FONTS, PN } from '../core/brand';
 
@@ -111,12 +111,12 @@ function drawItem(ctx: C, project: Project, it: SceneItem, src: MediaSources, op
   switch (clip.type) {
     case 'video': {
       const frame = src.video(clip, it.mediaTime);
-      if (frame) drawMedia(ctx, frame, w, h, clip.adjust, clip.flipH);
+      if (frame) drawMedia(ctx, frame, w, h, clip.adjust, clip.flipH, clip.crop);
       break;
     }
     case 'image': {
       const img = src.image(clip.mediaId);
-      if (img) drawMedia(ctx, img, w, h, (clip as ImageClip).adjust, clip.flipH);
+      if (img) drawMedia(ctx, img, w, h, (clip as ImageClip).adjust, clip.flipH, (clip as ImageClip).crop);
       break;
     }
     case 'text': {
@@ -150,27 +150,35 @@ function drawItem(ctx: C, project: Project, it: SceneItem, src: MediaSources, op
  */
 const frameCache = new Map<string, HTMLCanvasElement>();
 
-function drawFrame(ctx: C, clip: FrameClip, W: number, H: number, t: number) {
-  const def = getFrame(clip.frame);
+/** Camada da moldura guardada em memória (fixa); recriada se a logo/escala mudar. */
+function frameLayer(ctx: C, def: FrameDef, W: number, H: number, layer: 'bg' | 'fg'): HTMLCanvasElement {
   const m = ctx.getTransform();
   const k = Math.hypot(m.a, m.b); // pixels do canvas por pixel do projeto
-  const key = `${def.id}:${W}x${H}@${k.toFixed(4)}`;
-  let cached = frameCache.get(key);
-  if (!cached) {
-    const c = document.createElement('canvas');
-    c.width = Math.max(1, Math.round(W * k));
-    c.height = Math.max(1, Math.round(H * k));
-    const cctx = c.getContext('2d')!;
-    cctx.scale(c.width / W, c.height / H);
-    drawFrameStatic(cctx, def, W, H);
-    // só guarda depois que logos e fontes carregaram (senão ficariam faltando)
-    if (brandImage('horizontal') && document.fonts.status === 'loaded') {
-      if (frameCache.size > 8) frameCache.clear();
-      frameCache.set(key, c);
-    }
-    cached = c;
+  const key = `${def.id}:${layer}:${W}x${H}@${k.toFixed(4)}:v${brandVersion()}`;
+  const hit = frameCache.get(key);
+  if (hit) return hit;
+  const c = document.createElement('canvas');
+  c.width = Math.max(1, Math.round(W * k));
+  c.height = Math.max(1, Math.round(H * k));
+  const cctx = c.getContext('2d')!;
+  cctx.scale(c.width / W, c.height / H);
+  if (layer === 'bg') drawFrameBackground(cctx, def, W, H);
+  else drawFrameForeground(cctx, def, W, H);
+  // só guarda depois que logos e fontes carregaram (senão ficariam faltando)
+  if (brandImage('horizontal') && brandImage('round') && document.fonts.status === 'loaded') {
+    if (frameCache.size > 16) frameCache.clear();
+    frameCache.set(key, c);
   }
-  ctx.drawImage(cached, 0, 0, W, H);
+  return c;
+}
+
+function drawFrame(ctx: C, clip: FrameClip, W: number, H: number, t: number) {
+  const def = getFrame(clip.frame);
+  const win = frameWindow(def, W, H);
+  const full = win.w >= W - 0.5 && win.h >= H - 0.5;
+  ctx.drawImage(frameLayer(ctx, def, W, H, 'bg'), 0, 0, W, H);
+  if (!full) drawFrameWatermark(ctx, win, W, H, clip.duration > 0 ? t / clip.duration : 0);
+  ctx.drawImage(frameLayer(ctx, def, W, H, 'fg'), 0, 0, W, H);
   if (def.ticker) {
     const th = W * 0.075;
     ctx.save();
@@ -180,35 +188,88 @@ function drawFrame(ctx: C, clip: FrameClip, W: number, H: number, t: number) {
   }
 }
 
-/** Moldura da marca: fundo PN fora da janela, fios de acabamento, logo e @perfil. */
-function drawFrameStatic(ctx: C, def: ReturnType<typeof getFrame>, W: number, H: number) {
+/**
+ * Logo redonda grande e "vazada" no fundo azul da moldura, atravessando o quadro
+ * devagar durante o tempo em que a moldura está no ar (só fora da janela do vídeo).
+ */
+function drawFrameWatermark(ctx: C, win: { x: number; y: number; w: number; h: number }, W: number, H: number, progress: number) {
+  const img = brandImage('round');
+  if (!img) return;
+  const lh = H * 0.78;
+  const lw = lh * LOGO_RATIO.round;
+  const p = Math.min(1, Math.max(0, progress));
+  const cx = W * (0.08 + 0.84 * p); // da esquerda para a direita, bem devagar
+  const cy = H * 0.5;
+  ctx.save();
+  ctx.beginPath();
+  ctx.rect(0, 0, W, H);
+  ctx.rect(win.x, win.y, win.w, win.h);
+  ctx.clip('evenodd');
+  ctx.globalCompositeOperation = 'screen';
+  ctx.globalAlpha *= 0.16;
+  ctx.drawImage(img, cx - lw / 2, cy - lh / 2, lw, lh);
+  ctx.restore();
+}
+
+/** Fundo da moldura: azul da marca fora da janela, luz atrás da logo e feixes diagonais. */
+function drawFrameBackground(ctx: C, def: FrameDef, W: number, H: number) {
+  const win = frameWindow(def, W, H);
+  const full = win.w >= W - 0.5 && win.h >= H - 0.5;
+  if (full) return;
+  ctx.save();
+  ctx.beginPath();
+  ctx.rect(0, 0, W, H);
+  ctx.rect(win.x, win.y, win.w, win.h);
+  ctx.clip('evenodd');
+  const g = ctx.createLinearGradient(0, 0, 0, H);
+  g.addColorStop(0, PN.deep);
+  g.addColorStop(0.5, PN.navy);
+  g.addColorStop(1, '#07142a');
+  ctx.fillStyle = g;
+  ctx.fillRect(0, 0, W, H);
+  // luz atrás da logo do cabeçalho
+  const lcy = def.logoFill ? win.y / 2 : def.logo.cy * H;
+  const lg = ctx.createRadialGradient(W / 2, lcy, 0, W / 2, lcy, W * 0.6);
+  lg.addColorStop(0, 'rgba(56,182,255,0.34)');
+  lg.addColorStop(1, 'rgba(56,182,255,0)');
+  ctx.fillStyle = lg;
+  ctx.fillRect(0, 0, W, H);
+  // feixes de luz diagonais (brilho "de estúdio")
+  ctx.globalCompositeOperation = 'screen';
+  for (const [x0, wBeam, a] of [
+    [W * 0.12, W * 0.16, 0.07],
+    [W * 0.62, W * 0.1, 0.05],
+  ] as const) {
+    const bg = ctx.createLinearGradient(x0, 0, x0 + wBeam, 0);
+    bg.addColorStop(0, 'rgba(120,200,255,0)');
+    bg.addColorStop(0.5, `rgba(120,200,255,${a})`);
+    bg.addColorStop(1, 'rgba(120,200,255,0)');
+    ctx.fillStyle = bg;
+    ctx.beginPath();
+    ctx.moveTo(x0, 0);
+    ctx.lineTo(x0 + wBeam, 0);
+    ctx.lineTo(x0 + wBeam - H * 0.35, H);
+    ctx.lineTo(x0 - H * 0.35, H);
+    ctx.closePath();
+    ctx.fill();
+  }
+  ctx.restore();
+}
+
+/** Frente da moldura: fios de acabamento, logo do cabeçalho e @perfil. */
+function drawFrameForeground(ctx: C, def: FrameDef, W: number, H: number) {
   const win = frameWindow(def, W, H);
   const full = win.w >= W - 0.5 && win.h >= H - 0.5;
   if (!full) {
-    ctx.save();
-    ctx.beginPath();
-    ctx.rect(0, 0, W, H);
-    ctx.rect(win.x, win.y, win.w, win.h);
-    ctx.clip('evenodd');
-    const g = ctx.createLinearGradient(0, 0, 0, H);
-    g.addColorStop(0, PN.deep);
-    g.addColorStop(0.5, PN.navy);
-    g.addColorStop(1, '#07142a');
-    ctx.fillStyle = g;
-    ctx.fillRect(0, 0, W, H);
-    // luz suave atrás da logo
-    const lg = ctx.createRadialGradient(def.logo.cx * W, def.logo.cy * H, 0, def.logo.cx * W, def.logo.cy * H, W * 0.55);
-    lg.addColorStop(0, 'rgba(56,182,255,0.28)');
-    lg.addColorStop(1, 'rgba(56,182,255,0)');
-    ctx.fillStyle = lg;
-    ctx.fillRect(0, 0, W, H);
-    ctx.restore();
-    // fios de acabamento nas bordas da janela
     const t1 = Math.max(3, H * 0.003);
     const t2 = Math.max(5, H * 0.005);
+    ctx.save();
+    ctx.shadowColor = 'rgba(56,182,255,0.85)';
+    ctx.shadowBlur = H * 0.012;
     ctx.fillStyle = PN.sky;
     ctx.fillRect(win.x, win.y - t2, win.w, t2);
     ctx.fillRect(win.x, win.y + win.h, win.w, t2);
+    ctx.restore();
     ctx.fillStyle = '#04101f';
     ctx.fillRect(win.x, win.y - t2 - t1, win.w, t1);
     ctx.fillRect(win.x, win.y + win.h + t2, win.w, t1);
@@ -234,11 +295,30 @@ function drawFrameStatic(ctx: C, def: ReturnType<typeof getFrame>, W: number, H:
   }
 }
 
-function drawMedia(ctx: C, img: CanvasImageSource, w: number, h: number, adjust: Adjust, flip: boolean) {
+/** Tamanho natural da fonte de imagem (vídeo, quadro decodificado, imagem ou canvas). */
+function sourceSize(img: CanvasImageSource): { w: number; h: number } {
+  if (img instanceof HTMLVideoElement) return { w: img.videoWidth, h: img.videoHeight };
+  if (img instanceof HTMLImageElement) return { w: img.naturalWidth, h: img.naturalHeight };
+  if (typeof VideoFrame !== 'undefined' && img instanceof VideoFrame) return { w: img.displayWidth, h: img.displayHeight };
+  const anyImg = img as { width: number; height: number };
+  return { w: anyImg.width, h: anyImg.height };
+}
+
+function drawMedia(ctx: C, img: CanvasImageSource, w: number, h: number, adjust: Adjust, flip: boolean, crop?: Crop) {
   const f = adjustFilter(adjust);
   if (f !== 'none') ctx.filter = f;
   if (flip) ctx.scale(-1, 1);
-  ctx.drawImage(img, -w / 2, -h / 2, w, h);
+  if (crop && (crop.l || crop.t || crop.r || crop.b)) {
+    // corte: desenha só a parte não cortada da mídia, ocupando a caixa do elemento
+    const s = sourceSize(img);
+    const sx = crop.l * s.w;
+    const sy = crop.t * s.h;
+    const sw = Math.max(1, (1 - crop.l - crop.r) * s.w);
+    const sh = Math.max(1, (1 - crop.t - crop.b) * s.h);
+    ctx.drawImage(img, sx, sy, sw, sh, -w / 2, -h / 2, w, h);
+  } else {
+    ctx.drawImage(img, -w / 2, -h / 2, w, h);
+  }
   ctx.filter = 'none';
 }
 

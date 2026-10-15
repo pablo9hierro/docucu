@@ -1,12 +1,12 @@
 import { describe, expect, it } from 'vitest';
 import { animState, inOutProgress, transformAt, upsertKeyframe } from './animation';
 import { atempoChain, buildAudioPlan, buildFfmpegAudioGraph, gainAt } from './audio';
-import { hitTest, resizeTransform, rotate, snapPosition } from './geometry';
+import { dragCrop, hitTest, NO_CROP, removeCrop, resizeTransform, rotate, snapPosition } from './geometry';
 import { evaluateScene, frameTimes } from './scene';
 import { createBlurClip, createProject, createTextClip, createVideoClip, fitContain, fitCover } from './factory';
 import { placeClip } from './timeline';
 import { setTransformAt, toggleKeyframeAt } from './edit';
-import { applyFrame, FRAMES, frameWindow, getFrame } from './frames';
+import { insertFrame, FRAMES, frameWindow, getFrame } from './frames';
 import type { MediaAsset, Transform } from './model';
 import { ProjectSchema } from './model';
 
@@ -162,26 +162,58 @@ describe('cena e edição', () => {
     expect(evaluateScene(p, 2)[0]!.transform.x).toBeCloseTo(10);
   });
 
-  it('moldura ocupa UMA camada, substitui a anterior e enquadra o vídeo na janela', () => {
+  it('moldura é item normal: entra na agulha, pode haver várias e enquadra o vídeo do trecho', () => {
     let p = createProject('m', 'reel');
-    p = placeClip(p, createVideoClip(p, video, 0), p.tracks[0]!.id);
-    const before = p.clips.length;
+    p = placeClip(p, createVideoClip(p, { ...video, duration: 20 }, 0), p.tracks[0]!.id);
     for (const f of FRAMES) {
-      const r = applyFrame(p, f.id);
+      const r = insertFrame(p, f.id, 2);
       expect(ProjectSchema.safeParse(r.project).success).toBe(true);
-      expect(r.project.clips.length).toBe(before + 1);
-      expect(r.project.clips.filter((c) => c.type === 'frame')).toHaveLength(1);
+      const fr = r.project.clips.find((c) => c.id === r.clipId)!;
+      expect(fr.start).toBe(2);
+      expect(fr.duration).toBeCloseTo(15);
     }
-    const a = applyFrame(p, 'topo').project;
-    const b = applyFrame(a, 'central').project;
-    expect(b.clips.filter((c) => c.type === 'frame')).toHaveLength(1);
-    expect(b.tracks.filter((t) => t.name === 'Moldura')).toHaveLength(1);
-    // moldura logo acima da principal, abaixo das camadas de manchete
-    expect(b.tracks[1]!.name).toBe('Moldura');
+    // duas molduras no mesmo trecho: as duas existem, em trilhas de moldura diferentes
+    const a2 = insertFrame(p, 'topo', 0).project;
+    const b2 = insertFrame(a2, 'central', 0).project;
+    const frames = b2.clips.filter((c) => c.type === 'frame');
+    expect(frames).toHaveLength(2);
+    expect(new Set(frames.map((c) => c.trackId)).size).toBe(2);
+    // trilhas de moldura logo acima da principal, abaixo das manchetes
+    expect(b2.tracks[1]!.name.startsWith('Moldura')).toBe(true);
+    expect(b2.tracks[2]!.name.startsWith('Moldura')).toBe(true);
+    // moldura em outro trecho não briga com a primeira: reaproveita a mesma trilha
+    const c2 = insertFrame(a2, 'editorial', 16).project;
+    expect(c2.tracks.filter((t) => t.name.startsWith('Moldura'))).toHaveLength(1);
     const win = frameWindow(getFrame('central'), p.width, p.height);
-    const v = b.clips.find((c) => c.type === 'video')!;
+    const v = b2.clips.find((c) => c.type === 'video')!;
     expect(v.type === 'video' && v.transform.height).toBeCloseTo(win.h);
     expect(v.type === 'video' && v.transform.y).toBeCloseTo(win.y + win.h / 2);
+  });
+
+  it('corte: arrastar a borda corta só aquele lado e mantém o resto parado', () => {
+    const tr = { x: 500, y: 500, width: 400, height: 200, rotation: 0, opacity: 1 };
+    const r = dragCrop(tr, NO_CROP, 'l', 100);
+    expect(r.crop.l).toBeCloseTo(0.25);
+    expect(r.transform.width).toBeCloseTo(300);
+    // borda direita continua no mesmo lugar
+    expect(r.transform.x + r.transform.width / 2).toBeCloseTo(700);
+    const back = removeCrop(r.transform, r.crop);
+    expect(back.width).toBeCloseTo(400);
+    expect(back.x).toBeCloseTo(500);
+    const t2 = dragCrop(tr, NO_CROP, 'b', -50);
+    expect(t2.crop.b).toBeCloseTo(0.25);
+    expect(t2.transform.y - t2.transform.height / 2).toBeCloseTo(400); // topo parado
+  });
+
+  it('disfarce de voz entra no plano de áudio e no FFmpeg sem mudar a duração', () => {
+    let p = createProject('v', 'reel');
+    const v = createVideoClip(p, video, 0);
+    v.voice = 'high';
+    p = placeClip(p, v, p.tracks[0]!.id);
+    const plan = buildAudioPlan(p);
+    expect(plan[0]!.pitch).toBeGreaterThan(1);
+    const g = buildFfmpegAudioGraph(plan, new Map([['m', 1]]), 8)!;
+    expect(g.filter).toMatch(/asetrate=\d+,aresample=48000,atempo=0\.\d+/);
   });
 
   it('elementos entram na agulha com no máximo 15 s e sem passar do fim do vídeo', () => {
