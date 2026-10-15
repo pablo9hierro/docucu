@@ -48,6 +48,9 @@ export interface FrameSource {
   dispose(): void;
 }
 
+const FAILED: unique symbol = Symbol("decodificador falhou");
+const DECODER_TIMEOUT_MS = 8000;
+
 export async function prepareFrameSource(project: Project, media: Record<string, MediaAsset>): Promise<FrameSource> {
   const videos = new Map<string, HTMLVideoElement>();
   // caminho rápido: decodificação sequencial (mesmos quadros, sem reposicionar o vídeo)
@@ -81,9 +84,26 @@ export async function prepareFrameSource(project: Project, media: Record<string,
       const active = evaluateScene(project, t).filter((it) => it.clip.type === 'video');
       await Promise.all(
         active.map(async (it) => {
-          const dec = decoders.get(it.clip.id);
-          if (dec) decoded.set(it.clip.id, await dec.frameAt(it.mediaTime));
-          else await seekExact(videos.get(it.clip.id)!, it.mediaTime);
+          const id = it.clip.id;
+          const dec = decoders.get(id);
+          if (dec) {
+            // rede de segurança: se o decodificador do aparelho não responder,
+            // este vídeo passa para o método clássico e a exportação continua
+            const frame = await Promise.race([
+              dec.frameAt(it.mediaTime).catch((): typeof FAILED => FAILED),
+              new Promise<typeof FAILED>((r) => setTimeout(() => r(FAILED), DECODER_TIMEOUT_MS)),
+            ]);
+            if (frame !== FAILED) {
+              decoded.set(id, frame);
+              return;
+            }
+            dec.dispose();
+            decoders.delete(id);
+            decoded.delete(id);
+            const clip = it.clip as VideoClip;
+            videos.set(id, await loadVideo(media[clip.mediaId]!.url));
+          }
+          await seekExact(videos.get(id)!, it.mediaTime);
         }),
       );
     },

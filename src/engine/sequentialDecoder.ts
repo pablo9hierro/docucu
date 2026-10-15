@@ -78,6 +78,7 @@ export class SequentialDecoder {
   private current: VideoFrame | null = null;
   private next = 0;
   private flushed = false;
+  private flushing = false;
   private wake: (() => void) | null = null;
   private error: Error | null = null;
   private lastTarget = -Infinity;
@@ -137,6 +138,7 @@ export class SequentialDecoder {
     this.current?.close();
     this.current = null;
     this.flushed = false;
+    this.flushing = false;
     let k = 0;
     for (let i = 0; i < this.samples.length; i++) {
       const s = this.samples[i]!;
@@ -159,16 +161,30 @@ export class SequentialDecoder {
         this.current = this.queue.shift()!;
       }
       if (this.queue.length) break; // o próximo quadro já é posterior a t
-      if (this.flushed && this.decoder.decodeQueueSize === 0) break; // fim do arquivo
+      if (this.flushed && this.decoder.decodeQueueSize === 0 && !this.queue.length) break; // fim do arquivo
       // alimenta o decodificador mantendo uma fila curta
       while (this.next < this.samples.length && this.decoder.decodeQueueSize < 12) {
         const s = this.samples[this.next++]!;
         this.decoder.decode(new EncodedVideoChunk({ type: s.key ? 'key' : 'delta', timestamp: s.ts, duration: s.dur, data: s.data }));
       }
-      if (this.next >= this.samples.length && !this.flushed) {
-        await this.decoder.flush();
-        this.flushed = true;
-        continue;
+      if (this.next >= this.samples.length && !this.flushed && !this.flushing) {
+        // NÃO espera o flush aqui: o decodificador de hardware só tem alguns quadros
+        // disponíveis; se ficarmos parados segurando quadros, ele nunca termina
+        // (travava no fim da exportação). Os quadros seguem sendo entregues/liberados.
+        const dec = this.decoder;
+        this.flushing = true;
+        dec
+          .flush()
+          .then(() => {
+            if (dec === this.decoder) this.flushed = true;
+          })
+          .catch(() => {
+            if (dec === this.decoder) this.flushed = true;
+          })
+          .finally(() => {
+            if (dec === this.decoder) this.flushing = false;
+            this.wake?.();
+          });
       }
       await new Promise<void>((r) => {
         this.wake = r;
