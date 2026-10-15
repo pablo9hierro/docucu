@@ -92,6 +92,11 @@ async function mixAudio(project: Project, media: Record<string, MediaAsset>, dur
   return ctx.startRendering();
 }
 
+/** O navegador recolheu o codec por inatividade (recuperável recriando-o). */
+function isReclaim(e: Error | null): boolean {
+  return !!e && (/reclaim/i.test(e.message) || e.name === 'QuotaExceededError');
+}
+
 const BITRATE: Record<number, number> = { 16: 12_000_000, 19: 8_000_000, 24: 4_500_000 };
 
 export async function exportWithWebCodecs(
@@ -134,13 +139,18 @@ export async function exportWithWebCodecs(
   });
 
   let encodeError: Error | null = null;
-  const venc = new VideoEncoder({
-    output: (chunk, meta) => muxer.addVideoChunk(chunk, meta),
-    error: (e) => (encodeError = e instanceof Error ? e : new Error(String(e))),
-  });
-  venc.configure(vcfg);
-
+  // prepara os vídeos ANTES de ligar o codificador: o navegador recolhe
+  // codificadores ociosos ("Codec reclaimed due to inactivity")
   const src = await prepareFrameSource(project, media);
+  const makeEncoder = () => {
+    const enc = new VideoEncoder({
+      output: (chunk, meta) => muxer.addVideoChunk(chunk, meta),
+      error: (e) => (encodeError = e instanceof Error ? e : new Error(String(e))),
+    });
+    enc.configure(vcfg);
+    return enc;
+  };
+  let venc = makeEncoder();
   const canvas = document.createElement('canvas');
   canvas.width = width;
   canvas.height = height;
@@ -152,12 +162,20 @@ export async function exportWithWebCodecs(
   try {
     for (let i = 0; i < total; i++) {
       if (signal.aborted) throw new DOMException('Exportação cancelada', 'AbortError');
-      if (encodeError) throw encodeError;
       const t = i / fps;
       await src.seek(t);
       renderFrame(ctx, project, t, src.sources, { editorHints: false });
+      let forceKey = false;
+      if (encodeError || venc.state === 'closed') {
+        // codificador recolhido pelo navegador: recria e continua a partir deste quadro
+        if (!isReclaim(encodeError) && venc.state !== 'closed') throw encodeError;
+        encodeError = null;
+        if (venc.state !== 'closed') venc.close();
+        venc = makeEncoder();
+        forceKey = true;
+      }
       const frame = new VideoFrame(canvas, { timestamp: Math.round(i * frameUs), duration: Math.round(frameUs) });
-      venc.encode(frame, { keyFrame: i % (fps * 2) === 0 });
+      venc.encode(frame, { keyFrame: forceKey || i % (fps * 2) === 0 });
       frame.close();
       // controla a fila do codificador para não estourar a memória do aparelho
       while (venc.encodeQueueSize > 6) await new Promise((r) => setTimeout(r, 2));

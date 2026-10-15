@@ -6,7 +6,7 @@
 import type { MediaAsset, Project, VideoClip } from '../core/model';
 import { evaluateScene } from '../core/scene';
 import type { MediaSources } from '../render/renderer';
-import { SequentialDecoder } from './sequentialDecoder';
+import { SequentialDecoder, type Demuxed } from './sequentialDecoder';
 
 function loadVideo(url: string): Promise<HTMLVideoElement> {
   return new Promise((resolve, reject) => {
@@ -57,13 +57,15 @@ export async function prepareFrameSource(project: Project, media: Record<string,
   const decoders = new Map<string, SequentialDecoder>();
   const decoded = new Map<string, CanvasImageSource | null>();
   const images = new Map<string, HTMLImageElement>();
+  const urls = new Map<string, string>();
+  const demuxCache = new Map<string, Promise<Demuxed | null>>();
   for (const c of project.clips) {
     if (c.type === 'video') {
       const m = media[c.mediaId];
       if (!m) throw new Error(`Mídia ausente: ${c.name}`);
-      const dec = await SequentialDecoder.create(m.url);
-      if (dec) decoders.set(c.id, dec);
-      else videos.set(c.id, await loadVideo(m.url));
+      // o decodificador só é aberto quando o trecho começa (ver seek): o navegador
+      // recolhe codecs ociosos, e trechos do fim ficariam parados por muito tempo
+      urls.set(c.id, m.url);
     }
     const ids = c.type === 'image' ? [c.mediaId] : c.type === 'sponsors' ? c.mediaIds : [];
     for (const id of ids) {
@@ -82,6 +84,24 @@ export async function prepareFrameSource(project: Project, media: Record<string,
     },
     async seek(t) {
       const active = evaluateScene(project, t).filter((it) => it.clip.type === 'video');
+      const activeIds = new Set(active.map((it) => it.clip.id));
+      // fecha o que já terminou (libera o decodificador)
+      for (const [id, d] of decoders) {
+        if (!activeIds.has(id)) {
+          d.dispose();
+          decoders.delete(id);
+          decoded.delete(id);
+        }
+      }
+      // abre o que está começando agora
+      for (const it of active) {
+        const id = it.clip.id;
+        if (decoders.has(id) || videos.has(id)) continue;
+        const url = urls.get(id)!;
+        const dec = await SequentialDecoder.create(url, demuxCache);
+        if (dec) decoders.set(id, dec);
+        else videos.set(id, await loadVideo(url));
+      }
       await Promise.all(
         active.map(async (it) => {
           const id = it.clip.id;

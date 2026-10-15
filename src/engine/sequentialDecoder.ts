@@ -41,7 +41,9 @@ function rotationOf(m: ArrayLike<number>): number {
   return ((deg % 360) + 360) % 360;
 }
 
-function demux(buffer: ArrayBuffer): Promise<{ track: MP4VideoTrack; samples: Sample[]; desc?: Uint8Array } | null> {
+export type Demuxed = { track: MP4VideoTrack; samples: Sample[]; desc?: Uint8Array };
+
+function demux(buffer: ArrayBuffer): Promise<Demuxed | null> {
   return new Promise((resolve) => {
     const file = MP4Box.createFile();
     let track: MP4VideoTrack | null = null;
@@ -95,11 +97,19 @@ export class SequentialDecoder {
     this.createDecoder();
   }
 
-  static async create(url: string): Promise<SequentialDecoder | null> {
+  /** `cache`: leitura do arquivo compartilhada entre trechos do mesmo vídeo */
+  static async create(url: string, cache?: Map<string, Promise<Demuxed | null>>): Promise<SequentialDecoder | null> {
     if (typeof VideoDecoder === 'undefined') return null;
     try {
-      const buf = await (await fetch(url)).arrayBuffer();
-      const d = await demux(buf);
+      let p = cache?.get(url);
+      if (!p) {
+        p = fetch(url)
+          .then((r) => r.arrayBuffer())
+          .then(demux)
+          .catch(() => null);
+        cache?.set(url, p);
+      }
+      const d = await p;
       if (!d) return null;
       const config: VideoDecoderConfig = {
         codec: d.track.codec.startsWith('vp08') ? 'vp8' : d.track.codec,
@@ -154,7 +164,12 @@ export class SequentialDecoder {
     if (target < this.lastTarget - 1000 || this.lastTarget === -Infinity) this.restart(target);
     this.lastTarget = target;
     for (;;) {
-      if (this.error) throw this.error;
+      if (this.error) {
+        // o navegador recolhe decodificadores ociosos: recria a partir deste ponto
+        if (!/reclaim/i.test(this.error.message) && this.error.name !== 'QuotaExceededError') throw this.error;
+        this.error = null;
+        this.restart(target);
+      }
       // avança pelos quadros já decodificados que pertencem a este instante
       while (this.queue.length && this.queue[0]!.timestamp <= target) {
         this.current?.close();
